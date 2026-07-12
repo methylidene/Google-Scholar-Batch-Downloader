@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Google Scholar Batch Downloader",
+  "description": "在当前 Google Scholar 结果页筛选论文、下载公开 PDF，并导出书目信息。",
   "version": "1.0.0",
   "permissions": ["downloads", "storage"],
   "host_permissions": [
