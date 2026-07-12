@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Google Scholar Batch Downloader",
+  "version": "1.0.0",
+  "permissions": ["downloads", "storage"],
+  "host_permissions": [
+    "https://scholar.google.com/*",
+    "https://scholar.googleusercontent.com/*",
+    "http://127.0.0.1:23119/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://scholar.google.com/scholar*"],
+      "js": ["src/content.js"],
+      "css": ["src/content.css"]
+    }
+  ],
+  "options_page": "src/options.html"
+}
