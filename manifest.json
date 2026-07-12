@@ -15,8 +15,14 @@
   "content_scripts": [
     {
       "matches": ["https://scholar.google.com/scholar*"],
-      "js": ["src/content.js"],
+      "js": ["src/content-loader.js"],
       "css": ["src/content.css"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/content.js", "src/parser.js", "src/model.js"],
+      "matches": ["https://scholar.google.com/*"]
     }
   ],
   "options_page": "src/options.html"

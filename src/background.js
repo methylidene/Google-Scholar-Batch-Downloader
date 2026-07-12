@@ -26,12 +26,18 @@ export function makeBatchFiles(papers, results) {
   ];
 }
 
-async function download(options) {
-  return chrome.downloads.download({ conflictAction: 'uniquify', saveAs: false, ...options });
+async function download(options, chromeApi = chrome) {
+  return chromeApi.downloads.download({ conflictAction: 'uniquify', saveAs: false, ...options });
 }
 
-async function runBatch(papers) {
-  const { downloadDelayMs = 800 } = await chrome.storage.local.get({ downloadDelayMs: 800 });
+export function normalizeDownloadDelay(value) {
+  const delay = Number(value);
+  return Number.isFinite(delay) && delay >= 0 ? delay : 800;
+}
+
+export async function runBatch(papers, chromeApi = chrome) {
+  const { downloadDelayMs = 800 } = await chromeApi.storage.local.get({ downloadDelayMs: 800 });
+  const delay = normalizeDownloadDelay(downloadDelayMs);
   const results = [];
   const pdfPapers = papers.filter(paper => paper.pdfUrl);
   let pdfIndex = 0;
@@ -46,18 +52,31 @@ async function runBatch(papers) {
       const downloadId = await runWithRetry(() => download({
         url: paper.pdfUrl,
         filename: buildPdfFilename(paper),
-      }), 1);
+      }, chromeApi), 1);
       results.push({ id: paper.id, ok: true, status: 'success', downloadId });
     } catch (error) {
       results.push({ id: paper.id, ok: false, status: 'failed', error: error?.message || String(error) });
     }
 
     pdfIndex += 1;
-    if (pdfIndex < pdfPapers.length) await sleep(Number(downloadDelayMs) || 800);
+    if (pdfIndex < pdfPapers.length) await sleep(delay);
   }
 
+  const exportErrors = [];
   for (const file of makeBatchFiles(papers, results)) {
-    await download({ url: file.url, filename: file.filename });
+    try {
+      await download({ url: file.url, filename: file.filename }, chromeApi);
+    } catch (error) {
+      exportErrors.push({ extension: file.extension, error: error?.message || String(error) });
+    }
+  }
+  if (exportErrors.length) {
+    return {
+      ok: false,
+      error: `部分导出失败：${exportErrors.map(item => `${item.extension}: ${item.error}`).join('；')}`,
+      results,
+      exportErrors,
+    };
   }
   return { ok: true, results };
 }

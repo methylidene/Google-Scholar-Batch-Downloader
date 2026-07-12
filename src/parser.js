@@ -37,6 +37,11 @@ export function parseScholarPage(document) {
 
 export function detectScholarBlock(document) {
   if (document.querySelector('form#gs_captcha_f')) return 'captcha';
-  if (!document.querySelector(ROW_SELECTOR)) return 'structure';
+  const rows = [...document.querySelectorAll(ROW_SELECTOR)];
+  if (!rows.length) return 'structure';
+  if (rows.some(row => {
+    const title = (row.querySelector('.gs_rt')?.textContent || '').replace(/^\s*\[(?:PDF|HTML)\]\s*/i, '').trim();
+    return !title;
+  })) return 'structure';
   return null;
 }
