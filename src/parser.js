@@ -7,35 +7,50 @@ function resolveUrl(href, document) {
   return href ? new URL(href, document.baseURI).href : '';
 }
 
+export function pdfCandidateUrl(href, text, baseUrl) {
+  let url;
+  try {
+    url = new URL(href, baseUrl);
+  } catch {
+    return '';
+  }
+  const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
+  const isExplicitPdf = String(text || '').trim().toUpperCase() === '[PDF]';
+  const hasPdfPath = /\.pdf$/i.test(url.pathname);
+  return isHttp && (isExplicitPdf || hasPdfPath) ? url.href : '';
+}
+
+export function doiCandidateFromUrl(href, baseUrl) {
+  try {
+    const url = new URL(href, baseUrl);
+    if ((url.hostname === 'doi.org' || url.hostname === 'www.doi.org') && /^\/10\.\d{4,9}\//i.test(url.pathname)) {
+      return decodeURIComponent(url.pathname.slice(1));
+    }
+  } catch {
+    // Ignore malformed DOI links.
+  }
+  return '';
+}
+
+export function doiCandidateFromText(text) {
+  const match = String(text || '').match(/doi\s*:\s*(10\.\d{4,9}\/[-._;()/:a-z0-9]+)/i);
+  return match ? match[1].replace(/[.,;:]+$/, '') : '';
+}
+
 function findPdfUrl(row, document) {
   for (const anchor of row.querySelectorAll('a[href]')) {
-    let url;
-    try {
-      url = new URL(anchor.getAttribute('href'), document.baseURI);
-    } catch {
-      continue;
-    }
-    const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
-    const isExplicitPdf = anchor.textContent.trim().toUpperCase() === '[PDF]';
-    const hasPdfPath = /\.pdf$/i.test(url.pathname);
-    if (isHttp && (isExplicitPdf || hasPdfPath)) return url.href;
+    const candidate = pdfCandidateUrl(anchor.getAttribute('href'), anchor.textContent, document.baseURI);
+    if (candidate) return candidate;
   }
   return '';
 }
 
 function findDoi(row, document) {
   for (const anchor of row.querySelectorAll('a[href]')) {
-    try {
-      const url = new URL(anchor.getAttribute('href'), document.baseURI);
-      if ((url.hostname === 'doi.org' || url.hostname === 'www.doi.org') && /^\/10\.\d{4,9}\//i.test(url.pathname)) {
-        return decodeURIComponent(url.pathname.slice(1));
-      }
-    } catch {
-      // Ignore malformed links and continue with explicit text detection.
-    }
+    const candidate = doiCandidateFromUrl(anchor.getAttribute('href'), document.baseURI);
+    if (candidate) return candidate;
   }
-  const match = row.textContent.match(/doi\s*:\s*(10\.\d{4,9}\/[-._;()/:a-z0-9]+)/i);
-  return match ? match[1].replace(/[.,;:]+$/, '') : '';
+  return doiCandidateFromText(row.textContent);
 }
 
 export function parseScholarPage(document) {

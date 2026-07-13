@@ -1,6 +1,7 @@
 import { buildPdfFilename } from './model.js';
 import { toBibTeX, toDataUrl, toResultJson, toRis } from './exporters.js';
 import { buildZoteroRequest } from './zotero.js';
+import { enrichPapersSequentially } from './enrichment.js';
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -35,14 +36,34 @@ export function normalizeDownloadDelay(value) {
   return Number.isInteger(delay) && delay >= 300 && delay <= 5000 ? delay : 800;
 }
 
-export async function runBatch(papers, chromeApi = chrome) {
+function isProfileDetailCandidate(paper) {
+  if (!String(paper.id || '').startsWith('gsbd-profile-') || !paper.detailUrl || paper.pdfUrl) return false;
+  try {
+    const url = new URL(paper.detailUrl);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && /^scholar\.google\./i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
   const { downloadDelayMs = 800 } = await chromeApi.storage.local.get({ downloadDelayMs: 800 });
   const delay = normalizeDownloadDelay(downloadDelayMs);
+  const profileIndexes = papers.flatMap((paper, index) => isProfileDetailCandidate(paper) ? [index] : []);
+  const enrichment = await enrichPapersSequentially(profileIndexes.map(index => papers[index]), {
+    fetchImpl: dependencies.fetchImpl || globalThis.fetch,
+    delayMs: delay,
+    sleep: dependencies.sleep || sleep,
+  });
+  const batchPapers = [...papers];
+  profileIndexes.forEach((paperIndex, enrichmentIndex) => {
+    batchPapers[paperIndex] = enrichment.papers[enrichmentIndex];
+  });
   const results = [];
-  const pdfPapers = papers.filter(paper => paper.pdfUrl);
+  const pdfPapers = batchPapers.filter(paper => paper.pdfUrl);
   let pdfIndex = 0;
 
-  for (const paper of papers) {
+  for (const paper of batchPapers) {
     if (!paper.pdfUrl) {
       results.push({ id: paper.id, ok: true, status: 'metadata' });
       continue;
@@ -63,7 +84,7 @@ export async function runBatch(papers, chromeApi = chrome) {
   }
 
   const exportErrors = [];
-  for (const file of makeBatchFiles(papers, results)) {
+  for (const file of makeBatchFiles(batchPapers, results)) {
     try {
       await download({ url: file.url, filename: file.filename }, chromeApi);
     } catch (error) {
@@ -76,17 +97,26 @@ export async function runBatch(papers, chromeApi = chrome) {
       error: `部分导出失败：${exportErrors.map(item => `${item.extension}: ${item.error}`).join('；')}`,
       results,
       exportErrors,
+      enrichmentResults: enrichment.results,
+      blocked: enrichment.blocked,
+      notice: enrichment.blocked ? `Scholar detail lookup stopped because of ${enrichment.blocked === 'captcha' ? 'CAPTCHA' : 'abnormal traffic'}.` : '',
     };
   }
-  return { ok: true, results };
+  return {
+    ok: true,
+    results,
+    enrichmentResults: enrichment.results,
+    blocked: enrichment.blocked,
+    notice: enrichment.blocked ? `Scholar detail lookup stopped because of ${enrichment.blocked === 'captcha' ? 'CAPTCHA' : 'abnormal traffic'}.` : '',
+  };
 }
 
-async function sendZotero(papers) {
+export async function sendZotero(papers, fetchImpl = fetch) {
   const { url, options } = buildZoteroRequest(papers);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return { ok: true, results: papers.map(paper => ({ id: paper.id, ok: true, status: 'success' })) };
   } catch (error) {
