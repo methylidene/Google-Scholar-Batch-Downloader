@@ -1,5 +1,5 @@
 import { buildPdfFilename } from './model.js';
-import { toBibTeX, toDataUrl, toResultJson, toRis } from './exporters.js';
+import { toBibTeX, toCsv, toDataUrl, toResultJson, toRis } from './exporters.js';
 import { buildZoteroRequest } from './zotero.js';
 import { enrichPapersSequentially } from './enrichment.js';
 
@@ -24,6 +24,7 @@ export function makeBatchFiles(papers, results) {
     { extension: 'ris', filename: `${base}.ris`, url: toDataUrl(toRis(papers), 'application/x-research-info-systems') },
     { extension: 'bib', filename: `${base}.bib`, url: toDataUrl(toBibTeX(papers), 'application/x-bibtex') },
     { extension: 'json', filename: `${base}.json`, url: toDataUrl(toResultJson(papers, results), 'application/json') },
+    { extension: 'csv', filename: `${base}.csv`, url: toDataUrl(toCsv(results), 'text/csv') },
   ];
 }
 
@@ -46,6 +47,116 @@ function isProfileDetailCandidate(paper) {
   }
 }
 
+const isoNow = now => now().toISOString();
+
+const makeResult = (paper, now) => ({
+  id: paper.id,
+  title: paper.title || '',
+  authors: Array.isArray(paper.authors) ? [...paper.authors] : [],
+  year: paper.year || '',
+  status: '',
+  source: 'scholar',
+  pdfUrl: paper.pdfUrl || '',
+  filename: paper.pdfUrl ? buildPdfFilename(paper) : '',
+  downloadId: null,
+  error: '',
+  startedAt: isoNow(now),
+  finishedAt: '',
+  ok: false,
+});
+
+export async function downloadPapers(papers, chromeApi = chrome, dependencies = {}) {
+  const now = dependencies.now || (() => new Date());
+  const sleepImpl = dependencies.sleep || sleep;
+  const timeoutMs = dependencies.timeoutMs ?? 240_000;
+  const setTimer = dependencies.setTimeout || globalThis.setTimeout;
+  const clearTimer = dependencies.clearTimeout || globalThis.clearTimeout;
+  const delay = dependencies.downloadDelayMs ?? 800;
+  const results = papers.map(paper => makeResult(paper, now));
+  const pdfResults = results.filter(result => result.pdfUrl);
+
+  for (const result of results.filter(item => !item.pdfUrl)) {
+    result.status = 'no_pdf';
+    result.ok = true;
+    result.finishedAt = isoNow(now);
+  }
+  if (!pdfResults.length) return results;
+
+  const downloadEvents = chromeApi.downloads.onChanged;
+  if (!downloadEvents?.addListener || !downloadEvents?.removeListener) {
+    throw new Error('Chrome downloads.onChanged API 不可用');
+  }
+
+  const pendingByDownloadId = new Map();
+  let startsFinished = false;
+  let timeoutId = null;
+  let resolveCompletion;
+  const completion = new Promise(resolve => { resolveCompletion = resolve; });
+  const finishIfReady = () => {
+    if (startsFinished && pendingByDownloadId.size === 0) resolveCompletion();
+  };
+  const finishResult = (result, status, error = '') => {
+    if (result.status) return;
+    result.status = status;
+    result.ok = status === 'success' || status === 'no_pdf';
+    result.error = error;
+    result.finishedAt = isoNow(now);
+  };
+  const onChanged = delta => {
+    const result = pendingByDownloadId.get(delta?.id);
+    if (!result) return;
+    if (delta.error?.current) result.error = delta.error.current;
+    if (delta.state?.current === 'complete') {
+      finishResult(result, 'success');
+    } else if (delta.state?.current === 'interrupted') {
+      finishResult(result, 'failed', result.error || 'Chrome 下载已中断');
+    } else {
+      return;
+    }
+    pendingByDownloadId.delete(delta.id);
+    finishIfReady();
+  };
+
+  downloadEvents.addListener(onChanged);
+  try {
+    let pdfIndex = 0;
+    for (const result of results) {
+      if (!result.pdfUrl) continue;
+      try {
+        result.downloadId = await runWithRetry(() => download({
+          url: result.pdfUrl,
+          filename: result.filename,
+        }, chromeApi), 1);
+        pendingByDownloadId.set(result.downloadId, result);
+      } catch (error) {
+        finishResult(result, 'failed', error?.message || String(error));
+      }
+
+      pdfIndex += 1;
+      if (pdfIndex < pdfResults.length) await sleepImpl(delay);
+    }
+
+    startsFinished = true;
+    if (pendingByDownloadId.size === 0) {
+      finishIfReady();
+    } else {
+      timeoutId = setTimer(() => {
+        for (const result of pendingByDownloadId.values()) {
+          finishResult(result, 'timeout', `等待 Chrome 下载完成超过 ${Math.ceil(timeoutMs / 1000)} 秒`);
+        }
+        pendingByDownloadId.clear();
+        finishIfReady();
+      }, timeoutMs);
+    }
+    await completion;
+    return results;
+  } finally {
+    downloadEvents.removeListener(onChanged);
+    if (timeoutId !== null) clearTimer(timeoutId);
+    pendingByDownloadId.clear();
+  }
+}
+
 export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
   const { downloadDelayMs = 800 } = await chromeApi.storage.local.get({ downloadDelayMs: 800 });
   const delay = normalizeDownloadDelay(downloadDelayMs);
@@ -59,29 +170,10 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
   profileIndexes.forEach((paperIndex, enrichmentIndex) => {
     batchPapers[paperIndex] = enrichment.papers[enrichmentIndex];
   });
-  const results = [];
-  const pdfPapers = batchPapers.filter(paper => paper.pdfUrl);
-  let pdfIndex = 0;
-
-  for (const paper of batchPapers) {
-    if (!paper.pdfUrl) {
-      results.push({ id: paper.id, ok: true, status: 'metadata' });
-      continue;
-    }
-
-    try {
-      const downloadId = await runWithRetry(() => download({
-        url: paper.pdfUrl,
-        filename: buildPdfFilename(paper),
-      }, chromeApi), 1);
-      results.push({ id: paper.id, ok: true, status: 'success', downloadId });
-    } catch (error) {
-      results.push({ id: paper.id, ok: false, status: 'failed', error: error?.message || String(error) });
-    }
-
-    pdfIndex += 1;
-    if (pdfIndex < pdfPapers.length) await sleep(delay);
-  }
+  const results = await downloadPapers(batchPapers, chromeApi, {
+    ...dependencies,
+    downloadDelayMs: delay,
+  });
 
   const exportErrors = [];
   for (const file of makeBatchFiles(batchPapers, results)) {
