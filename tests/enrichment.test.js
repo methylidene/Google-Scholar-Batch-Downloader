@@ -18,6 +18,15 @@ test('citation details accept explicit PDF and PDF paths with query strings, but
   assert.equal(html.pdfUrl, '');
 });
 
+test('citation details read the actual href attribute rather than data-href suffixes', () => {
+  const detail = parseCitationDetail(
+    '<a data-href="https://attacker.test/file.pdf" href="/landing">Landing</a>',
+    'https://scholar.google.com/citations',
+  );
+
+  assert.equal(detail.pdfUrl, '');
+});
+
 test('citation details extract only explicit DOI candidates', () => {
   assert.equal(parseCitationDetail('<p>DOI: 10.1000/example-7.</p>', 'https://scholar.google.com').doi, '10.1000/example-7');
   assert.equal(parseCitationDetail('<a href="https://doi.org/10.5555/ABC.9">record</a>', 'https://scholar.google.com').doi, '10.5555/ABC.9');
@@ -72,6 +81,26 @@ test('ordinary failures retain metadata and continue, including non-HTML respons
   assert.equal(result.papers[1], papers[1]);
   assert.equal(result.papers[2].doi, '10.1000/third');
   assert.deepEqual(result.results.map(item => item.ok), [false, false, true]);
+});
+
+test('an unsuccessful HTTP response is an ordinary failure and later papers continue', async () => {
+  const calls = [];
+  const papers = [1, 2].map(id => ({ id: String(id), detailUrl: `https://scholar.google.com/detail/${id}`, pdfUrl: '', doi: '' }));
+  const result = await enrichPapersSequentially(papers, {
+    fetchImpl: async url => {
+      calls.push(url);
+      return calls.length === 1
+        ? htmlResponse('server error', { ok: false })
+        : htmlResponse('<a href="/two.pdf">[PDF]</a>');
+    },
+    delayMs: 0,
+    sleep: async () => {},
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(result.papers[0], papers[0]);
+  assert.equal(result.papers[1].pdfUrl, 'https://scholar.google.com/two.pdf');
+  assert.deepEqual(result.results.map(item => item.ok), [false, true]);
 });
 
 test('a blocked response stops later fetches and retains remaining papers', async () => {

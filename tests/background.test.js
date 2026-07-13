@@ -78,6 +78,31 @@ test('RUN_BATCH enriches only profile records before downloading and preserves e
   assert.deepEqual(response.results.map(item => item.status), ['success', 'metadata']);
 });
 
+test('RUN_BATCH fetches only missing-PDF profile details on exact HTTPS Scholar host', async () => {
+  const fetched = [];
+  const chromeApi = {
+    storage: { local: { get: async () => ({ downloadDelayMs: 300 }) } },
+    downloads: { download: async () => 1 },
+  };
+  const papers = [
+    { id: 'gsbd-profile-valid', detailUrl: 'https://scholar.google.com/citations?valid', pdfUrl: '' },
+    { id: 'gsbd-profile-evil', detailUrl: 'https://scholar.google.evil.example/citations?evil', pdfUrl: '' },
+    { id: 'gsbd-profile-http', detailUrl: 'http://scholar.google.com/citations?http', pdfUrl: '' },
+    { id: 'gsbd-profile-pdf', detailUrl: 'https://scholar.google.com/citations?pdf', pdfUrl: 'https://files.test/existing.pdf' },
+    { id: 'gsbd-profile-no-detail', detailUrl: '', pdfUrl: '' },
+  ].map(paper => ({ title: paper.id, authors: [], year: '', venue: '', snippet: '', doi: '', ...paper }));
+
+  await runBatch(papers, chromeApi, {
+    fetchImpl: async url => {
+      fetched.push(url);
+      return { ok: true, headers: { get: () => 'text/html' }, text: async () => '<main>No PDF</main>' };
+    },
+    sleep: async () => {},
+  });
+
+  assert.deepEqual(fetched, ['https://scholar.google.com/citations?valid']);
+});
+
 test('RUN_BATCH reports a blocked enrichment and still exports retained metadata', async () => {
   const downloaded = [];
   const chromeApi = {

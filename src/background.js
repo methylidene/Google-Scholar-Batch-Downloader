@@ -40,7 +40,7 @@ function isProfileDetailCandidate(paper) {
   if (!String(paper.id || '').startsWith('gsbd-profile-') || !paper.detailUrl || paper.pdfUrl) return false;
   try {
     const url = new URL(paper.detailUrl);
-    return (url.protocol === 'https:' || url.protocol === 'http:') && /^scholar\.google\./i.test(url.hostname);
+    return url.protocol === 'https:' && url.hostname === 'scholar.google.com';
   } catch {
     return false;
   }

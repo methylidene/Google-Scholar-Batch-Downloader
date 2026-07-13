@@ -19,7 +19,7 @@ function anchorsFromHtml(html) {
   const anchors = [];
   const pattern = /<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi;
   for (const match of String(html || '').matchAll(pattern)) {
-    const href = match[1].match(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const href = match[1].match(/(?:^|\s)href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
     if (href) anchors.push({ href: decodeHtml(href[1] ?? href[2] ?? href[3]), text: stripTags(match[2]) });
   }
   return anchors;
