@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Google Scholar Batch Downloader",
   "description": "在 Google Scholar 搜索结果页和作者主页选择论文、下载公开 PDF，并导出书目信息。",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "permissions": ["downloads", "storage"],
   "host_permissions": [
     "https://scholar.google.com/*",

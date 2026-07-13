@@ -203,6 +203,7 @@ test('applies the active title filter to newly appended profile rows', async () 
 test('manifest enables profile pages without adding tabs permission', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
 
+  assert.equal(manifest.version, '1.2.0');
   assert.equal(manifest.content_scripts[0].matches.includes('https://scholar.google.com/citations*'), true);
   assert.equal(manifest.permissions.includes('tabs'), false);
 });
