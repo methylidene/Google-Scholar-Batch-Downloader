@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizePaper } from '../src/model.js';
-import { toRis, toBibTeX, toResultJson, toDataUrl } from '../src/exporters.js';
+import { toRis, toBibTeX, toResultJson, toDataUrl, toCsv } from '../src/exporters.js';
 
 test('exports every selected paper including metadata-only records', () => {
   const papers = [normalizePaper({ id: 'p1', title: 'Study', authors: ['Alice Wang', 'Bob Li'], year: '2025', venue: 'Journal', detailUrl: 'https://example.test' })];
@@ -49,4 +49,54 @@ test('serializes papers and results with a generated timestamp', () => {
 
 test('creates a UTF-8 data URL', () => {
   assert.equal(toDataUrl('A & B', 'text/plain'), 'data:text/plain;charset=utf-8,A%20%26%20B');
+});
+
+test('exports batch results as UTF-8 BOM CSV with stable columns', () => {
+  const result = {
+    title: '论文, "测试"',
+    authors: ['张三', '李四'],
+    year: '2026',
+    status: 'failed',
+    source: 'scholar',
+    pdfUrl: 'https://example.test/paper.pdf?name=a,b',
+    filename: '张三 - 2026 - 论文.pdf',
+    downloadId: 42,
+    error: '网络\r\n中断',
+    startedAt: '2026-07-13T10:00:00.000Z',
+    finishedAt: '2026-07-13T10:00:01.000Z',
+  };
+
+  const csv = toCsv([result]);
+
+  assert.equal(csv.charCodeAt(0), 0xFEFF);
+  assert.equal(csv.slice(1).split('\r\n')[0], 'title,authors,year,status,source,pdfUrl,filename,downloadId,error,startedAt,finishedAt');
+  assert.match(csv, /"论文, ""测试"""/);
+  assert.match(csv, /张三；李四/);
+  assert.match(csv, /"https:\/\/example\.test\/paper\.pdf\?name=a,b"/);
+  assert.match(csv, /"网络\r\n中断"/);
+  assert.match(csv, /,42,/);
+});
+
+test('escapes CSV cells and keeps nullish values empty without mutating results', () => {
+  const results = [{
+    title: 'line one\nline two',
+    authors: null,
+    year: undefined,
+    status: 'no_pdf',
+    source: 'scholar',
+    pdfUrl: '',
+    filename: '',
+    downloadId: null,
+    error: 'say "no"',
+    startedAt: '',
+    finishedAt: '',
+  }];
+  const snapshot = structuredClone(results);
+
+  const csv = toCsv(results);
+
+  assert.match(csv, /"line one\nline two",,,no_pdf,scholar,,,/);
+  assert.match(csv, /"say ""no"""/);
+  assert.deepEqual(results, snapshot);
+  assert.equal(csv.endsWith('\r\n'), true);
 });

@@ -46,6 +46,35 @@ export function toResultJson(papers, results) {
   return JSON.stringify({ generatedAt: new Date().toISOString(), papers, results }, null, 2);
 }
 
+const CSV_COLUMNS = [
+  'title',
+  'authors',
+  'year',
+  'status',
+  'source',
+  'pdfUrl',
+  'filename',
+  'downloadId',
+  'error',
+  'startedAt',
+  'finishedAt',
+];
+
+const escapeCsvCell = value => {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export function toCsv(results) {
+  const rows = results.map(result => CSV_COLUMNS.map(column => {
+    const value = column === 'authors' && Array.isArray(result.authors)
+      ? result.authors.join('；')
+      : result[column];
+    return escapeCsvCell(value);
+  }).join(','));
+  return `\uFEFF${[CSV_COLUMNS.join(','), ...rows].join('\r\n')}\r\n`;
+}
+
 export function toDataUrl(text, mime) {
   return `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
 }
