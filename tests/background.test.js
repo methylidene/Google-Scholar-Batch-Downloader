@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downloadPapers, makeBatchFiles, normalizeDownloadDelay, runBatch, runWithRetry, sendZotero } from '../src/background.js';
+import { applyArxivFallbacks, downloadPapers, makeBatchFiles, normalizeDownloadDelay, runBatch, runWithRetry, sendZotero } from '../src/background.js';
 
 function makeDownloadApi(downloadImpl = async (_options, id) => id) {
   const listeners = new Set();
@@ -31,6 +31,17 @@ function makeAutoCompletingDownloads(attempts = []) {
     return id;
   });
 }
+
+const arxivFeed = ({ title = 'Fallback Paper', id = '2401.12345v1', doi = '' } = {}) => `
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/${id}</id>
+    <title>${title}</title>
+    <author><name>Ada Lovelace</name></author>
+    ${doi ? `<arxiv:doi>${doi}</arxiv:doi>` : ''}
+    <link title="pdf" href="http://arxiv.org/pdf/${id}" rel="related" type="application/pdf"/>
+  </entry>
+</feed>`;
 
 test('retries one failed task once', async () => {
   let calls = 0;
@@ -132,6 +143,102 @@ test('classifies missing PDFs immediately without installing a download listener
   assert.equal(downloads.listenerCount(), 0);
 });
 
+test('uses the paper source in terminal download results', async () => {
+  const downloads = makeAutoCompletingDownloads();
+  const [result] = await downloadPapers([
+    { id: 'p1', title: 'Preprint', authors: [], year: '', source: 'arxiv', arxivId: '2401.1', pdfUrl: 'https://arxiv.org/pdf/2401.1' },
+  ], { downloads }, { timeoutMs: 1000 });
+
+  assert.equal(result.status, 'success');
+  assert.equal(result.source, 'arxiv');
+  assert.equal(result.arxivId, '2401.1');
+});
+
+test('retries only no-PDF and failed Scholar papers through arXiv', async () => {
+  const papers = [
+    { id: 'ok', title: 'Already Downloaded', authors: [], year: '', pdfUrl: 'https://files.test/ok.pdf' },
+    { id: 'missing', title: 'Fallback Paper', authors: ['Ada'], year: '2024', pdfUrl: '' },
+    { id: 'failed', title: 'Not on arXiv', authors: [], year: '', pdfUrl: 'https://files.test/broken.pdf' },
+    { id: 'slow', title: 'Still Running', authors: [], year: '', pdfUrl: 'https://files.test/slow.pdf' },
+  ];
+  const scholarResults = [
+    { id: 'ok', title: papers[0].title, status: 'success', source: 'scholar', error: '', ok: true },
+    { id: 'missing', title: papers[1].title, status: 'no_pdf', source: 'scholar', error: '', ok: true },
+    { id: 'failed', title: papers[2].title, status: 'failed', source: 'scholar', error: 'NETWORK_FAILED', ok: false },
+    { id: 'slow', title: papers[3].title, status: 'timeout', source: 'scholar', error: '240 seconds', ok: false },
+  ];
+  let lookupIds;
+  const { results, lookups } = await applyArxivFallbacks(papers, scholarResults, {
+    downloads: makeAutoCompletingDownloads(),
+  }, {
+    sleep: async () => {},
+    findMatches: async eligible => {
+      lookupIds = eligible.map(paper => paper.id);
+      return [
+        { id: 'missing', status: 'matched', match: { arxivId: '2401.12345v1', pdfUrl: 'https://arxiv.org/pdf/2401.12345v1', abstractUrl: 'https://arxiv.org/abs/2401.12345v1' } },
+        { id: 'failed', status: 'not_found' },
+      ];
+    },
+  });
+
+  assert.deepEqual(lookupIds, ['missing', 'failed']);
+  assert.deepEqual(lookups.map(item => item.status), ['matched', 'not_found']);
+  assert.deepEqual(results.map(result => result.status), ['success', 'success', 'failed', 'timeout']);
+  assert.equal(results[1].source, 'arxiv');
+  assert.equal(results[1].arxivId, '2401.12345v1');
+  assert.equal(results[1].scholarStatus, 'no_pdf');
+  assert.equal(results[1].fallbackStatus, 'success');
+  assert.equal(results[2].scholarStatus, 'failed');
+  assert.equal(results[2].fallbackStatus, 'not_found');
+  assert.equal(results[3].fallbackStatus, 'not_needed');
+});
+
+test('reports an arXiv download failure without losing the Scholar attempt', async () => {
+  const downloads = makeDownloadApi(async () => { throw new Error('arxiv blocked'); });
+  const { results } = await applyArxivFallbacks(
+    [{ id: 'p1', title: 'Fallback', authors: [], year: '', pdfUrl: '' }],
+    [{ id: 'p1', title: 'Fallback', status: 'no_pdf', source: 'scholar', error: '', ok: true }],
+    { downloads },
+    { findMatches: async () => [{
+      id: 'p1',
+      status: 'matched',
+      match: { arxivId: '2401.1', pdfUrl: 'https://arxiv.org/pdf/2401.1', abstractUrl: 'https://arxiv.org/abs/2401.1' },
+    }] },
+  );
+
+  assert.equal(results[0].status, 'failed');
+  assert.equal(results[0].source, 'arxiv');
+  assert.equal(results[0].scholarStatus, 'no_pdf');
+  assert.equal(results[0].fallbackStatus, 'failed');
+  assert.match(results[0].fallbackError, /arxiv blocked/);
+});
+
+test('RUN_BATCH downloads an exact arXiv fallback when enabled', async () => {
+  const downloaded = [];
+  const fetched = [];
+  const chromeApi = {
+    storage: { local: { get: async defaults => ({ ...defaults, downloadDelayMs: 300, enableArxivFallback: true }) } },
+    downloads: makeAutoCompletingDownloads(downloaded),
+  };
+  const response = await runBatch([
+    { id: 'p1', title: 'Fallback Paper', authors: ['Ada Lovelace'], year: '2024', doi: '', pdfUrl: '' },
+  ], chromeApi, {
+    fetchImpl: async url => {
+      fetched.push(url);
+      return { ok: true, status: 200, text: async () => arxivFeed() };
+    },
+    sleep: async () => {},
+  });
+
+  assert.equal(fetched.length, 1);
+  assert.match(fetched[0], /^https:\/\/export\.arxiv\.org\/api\/query/);
+  assert.equal(downloaded[0].url, 'https://arxiv.org/pdf/2401.12345v1');
+  assert.equal(response.results[0].status, 'success');
+  assert.equal(response.results[0].source, 'arxiv');
+  assert.equal(response.results[0].scholarStatus, 'no_pdf');
+  assert.equal(response.fallbackResults[0].status, 'matched');
+});
+
 test('retries a start failure once and continues later PDF downloads', async () => {
   const attempts = [];
   const downloads = makeDownloadApi(async (options, id) => {
@@ -160,7 +267,7 @@ test('retries a start failure once and continues later PDF downloads', async () 
 test('continues remaining exports and preserves paper results when one export fails', async () => {
   const attempts = [];
   const chromeApi = {
-    storage: { local: { get: async () => ({ downloadDelayMs: 0 }) } },
+    storage: { local: { get: async () => ({ downloadDelayMs: 0, enableArxivFallback: false }) } },
     downloads: {
       download: async options => {
         attempts.push(options.filename);
@@ -197,7 +304,7 @@ test('RUN_BATCH enriches only profile records before downloading and preserves e
   const fetched = [];
   const downloaded = [];
   const chromeApi = {
-    storage: { local: { get: async () => ({ downloadDelayMs: 300 }) } },
+    storage: { local: { get: async () => ({ downloadDelayMs: 300, enableArxivFallback: false }) } },
     downloads: makeAutoCompletingDownloads(downloaded),
   };
   const papers = [
@@ -223,7 +330,7 @@ test('RUN_BATCH enriches only profile records before downloading and preserves e
 test('RUN_BATCH fetches only missing-PDF profile details on exact HTTPS Scholar host', async () => {
   const fetched = [];
   const chromeApi = {
-    storage: { local: { get: async () => ({ downloadDelayMs: 300 }) } },
+    storage: { local: { get: async () => ({ downloadDelayMs: 300, enableArxivFallback: false }) } },
     downloads: makeAutoCompletingDownloads(),
   };
   const papers = [
@@ -248,7 +355,7 @@ test('RUN_BATCH fetches only missing-PDF profile details on exact HTTPS Scholar 
 test('RUN_BATCH reports a blocked enrichment and still exports retained metadata', async () => {
   const downloaded = [];
   const chromeApi = {
-    storage: { local: { get: async () => ({ downloadDelayMs: 300 }) } },
+    storage: { local: { get: async () => ({ downloadDelayMs: 300, enableArxivFallback: false }) } },
     downloads: { download: async options => { downloaded.push(options); return downloaded.length; } },
   };
   const papers = [

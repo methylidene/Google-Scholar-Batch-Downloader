@@ -2,6 +2,7 @@ import { buildPdfFilename } from './model.js';
 import { toBibTeX, toCsv, toDataUrl, toResultJson, toRis } from './exporters.js';
 import { buildZoteroRequest } from './zotero.js';
 import { enrichPapersSequentially } from './enrichment.js';
+import { findArxivMatchesSequentially } from './arxiv.js';
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -55,7 +56,8 @@ const makeResult = (paper, now) => ({
   authors: Array.isArray(paper.authors) ? [...paper.authors] : [],
   year: paper.year || '',
   status: '',
-  source: 'scholar',
+  source: paper.source || 'scholar',
+  arxivId: paper.arxivId || '',
   pdfUrl: paper.pdfUrl || '',
   filename: paper.pdfUrl ? buildPdfFilename(paper) : '',
   downloadId: null,
@@ -157,8 +159,83 @@ export async function downloadPapers(papers, chromeApi = chrome, dependencies = 
   }
 }
 
+const withScholarAttempt = result => ({
+  ...result,
+  scholarStatus: result.status,
+  scholarError: result.error || '',
+  fallbackStatus: 'not_needed',
+  fallbackError: '',
+  arxivId: result.arxivId || '',
+});
+
+export async function applyArxivFallbacks(papers, scholarResults, chromeApi = chrome, dependencies = {}) {
+  const paperById = new Map(papers.map(paper => [paper.id, paper]));
+  const baseResults = scholarResults.map(withScholarAttempt);
+  const eligible = baseResults
+    .filter(result => result.status === 'no_pdf' || result.status === 'failed')
+    .map(result => paperById.get(result.id))
+    .filter(Boolean);
+  if (!eligible.length) return { results: baseResults, lookups: [] };
+
+  const findMatches = dependencies.findMatches || findArxivMatchesSequentially;
+  const lookups = await findMatches(eligible, {
+    fetchImpl: dependencies.fetchImpl || globalThis.fetch,
+    sleep: dependencies.sleep || sleep,
+    delayMs: 3000,
+  });
+  const lookupById = new Map(lookups.map(lookup => [lookup.id, lookup]));
+  const fallbackPapers = lookups.flatMap(lookup => {
+    if (lookup.status !== 'matched') return [];
+    const paper = paperById.get(lookup.id);
+    return paper ? [{
+      ...paper,
+      source: 'arxiv',
+      arxivId: lookup.match.arxivId,
+      pdfUrl: lookup.match.pdfUrl,
+      detailUrl: lookup.match.abstractUrl,
+    }] : [];
+  });
+  const fallbackDownloads = fallbackPapers.length
+    ? await downloadPapers(fallbackPapers, chromeApi, dependencies)
+    : [];
+  const fallbackById = new Map(fallbackDownloads.map(result => [result.id, result]));
+
+  const results = baseResults.map(result => {
+    const lookup = lookupById.get(result.id);
+    if (!lookup) return result;
+    if (lookup.status !== 'matched') {
+      return {
+        ...result,
+        fallbackStatus: lookup.status,
+        fallbackError: lookup.error || '',
+      };
+    }
+    const fallback = fallbackById.get(result.id);
+    if (!fallback) {
+      return {
+        ...result,
+        fallbackStatus: 'failed',
+        fallbackError: 'arXiv 匹配成功，但未创建下载结果',
+        arxivId: lookup.match.arxivId,
+      };
+    }
+    return {
+      ...fallback,
+      scholarStatus: result.scholarStatus,
+      scholarError: result.scholarError,
+      fallbackStatus: fallback.status,
+      fallbackError: fallback.error || '',
+      arxivId: lookup.match.arxivId,
+    };
+  });
+  return { results, lookups };
+}
+
 export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
-  const { downloadDelayMs = 800 } = await chromeApi.storage.local.get({ downloadDelayMs: 800 });
+  const { downloadDelayMs = 800, enableArxivFallback = true } = await chromeApi.storage.local.get({
+    downloadDelayMs: 800,
+    enableArxivFallback: true,
+  });
   const delay = normalizeDownloadDelay(downloadDelayMs);
   const profileIndexes = papers.flatMap((paper, index) => isProfileDetailCandidate(paper) ? [index] : []);
   const enrichment = await enrichPapersSequentially(profileIndexes.map(index => papers[index]), {
@@ -170,10 +247,17 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
   profileIndexes.forEach((paperIndex, enrichmentIndex) => {
     batchPapers[paperIndex] = enrichment.papers[enrichmentIndex];
   });
-  const results = await downloadPapers(batchPapers, chromeApi, {
+  const scholarResults = await downloadPapers(batchPapers, chromeApi, {
     ...dependencies,
     downloadDelayMs: delay,
   });
+  const fallback = enableArxivFallback
+    ? await applyArxivFallbacks(batchPapers, scholarResults, chromeApi, {
+      ...dependencies,
+      downloadDelayMs: delay,
+    })
+    : { results: scholarResults.map(withScholarAttempt), lookups: [] };
+  const results = fallback.results;
 
   const exportErrors = [];
   for (const file of makeBatchFiles(batchPapers, results)) {
@@ -190,6 +274,7 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
       results,
       exportErrors,
       enrichmentResults: enrichment.results,
+      fallbackResults: fallback.lookups,
       blocked: enrichment.blocked,
       notice: enrichment.blocked ? `Scholar detail lookup stopped because of ${enrichment.blocked === 'captcha' ? 'CAPTCHA' : 'abnormal traffic'}.` : '',
     };
@@ -198,6 +283,7 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
     ok: true,
     results,
     enrichmentResults: enrichment.results,
+    fallbackResults: fallback.lookups,
     blocked: enrichment.blocked,
     notice: enrichment.blocked ? `Scholar detail lookup stopped because of ${enrichment.blocked === 'captcha' ? 'CAPTCHA' : 'abnormal traffic'}.` : '',
   };

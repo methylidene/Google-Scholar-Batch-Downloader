@@ -58,6 +58,11 @@ const CSV_COLUMNS = [
   'error',
   'startedAt',
   'finishedAt',
+  'scholarStatus',
+  'scholarError',
+  'fallbackStatus',
+  'fallbackError',
+  'arxivId',
 ];
 
 const escapeCsvCell = value => {

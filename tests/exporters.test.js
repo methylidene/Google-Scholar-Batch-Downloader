@@ -64,17 +64,23 @@ test('exports batch results as UTF-8 BOM CSV with stable columns', () => {
     error: '网络\r\n中断',
     startedAt: '2026-07-13T10:00:00.000Z',
     finishedAt: '2026-07-13T10:00:01.000Z',
+    scholarStatus: 'failed',
+    scholarError: 'ORIGINAL_FAILED',
+    fallbackStatus: 'success',
+    fallbackError: '',
+    arxivId: '2401.12345v1',
   };
 
   const csv = toCsv([result]);
 
   assert.equal(csv.charCodeAt(0), 0xFEFF);
-  assert.equal(csv.slice(1).split('\r\n')[0], 'title,authors,year,status,source,pdfUrl,filename,downloadId,error,startedAt,finishedAt');
+  assert.equal(csv.slice(1).split('\r\n')[0], 'title,authors,year,status,source,pdfUrl,filename,downloadId,error,startedAt,finishedAt,scholarStatus,scholarError,fallbackStatus,fallbackError,arxivId');
   assert.match(csv, /"论文, ""测试"""/);
   assert.match(csv, /张三；李四/);
   assert.match(csv, /"https:\/\/example\.test\/paper\.pdf\?name=a,b"/);
   assert.match(csv, /"网络\r\n中断"/);
   assert.match(csv, /,42,/);
+  assert.match(csv, /,failed,ORIGINAL_FAILED,success,,2401\.12345v1/);
 });
 
 test('escapes CSV cells and keeps nullish values empty without mutating results', () => {
