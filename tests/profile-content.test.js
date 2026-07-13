@@ -117,7 +117,7 @@ test('sends selected profile papers and marks them as looking up details', async
   assert.equal(message.papers[0].title, 'Analytical Engines');
   assert.equal(checkbox.closest('.gsc_a_tr').querySelector('.gsbd-row-status').textContent, '查询详情');
 
-  resolveMessage({ ok: true, results: [{ id: message.papers[0].id, ok: true, status: 'metadata' }] });
+  resolveMessage({ ok: true, results: [{ id: message.papers[0].id, ok: true, status: 'no_pdf' }] });
   await response;
 });
 

@@ -45,6 +45,6 @@ test('renders selected downloading and final row states', async () => {
   ] });
   await response;
   await Promise.resolve();
-  assert.equal(rowStatus.textContent, '成功');
-  assert.equal(failedStatus.textContent, '失败：network');
+  assert.equal(rowStatus.textContent, '下载成功');
+  assert.equal(failedStatus.textContent, '下载失败：network');
 });

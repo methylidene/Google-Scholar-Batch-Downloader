@@ -8,6 +8,104 @@ import {
 
 const RESULTS_ROW_SELECTOR = '.gs_r.gs_or.gs_scl';
 const PROFILE_ROW_SELECTOR = '.gsc_a_tr';
+const REPORT_STATUS = {
+  success: { label: '下载成功', countLabel: '成功下载' },
+  no_pdf: { label: '未找到 PDF', countLabel: '未找到 PDF' },
+  failed: { label: '下载失败', countLabel: '下载失败' },
+  timeout: { label: '下载超时', countLabel: '下载超时' },
+};
+
+function appendReportField(document, parent, label, value) {
+  const line = document.createElement('p');
+  const name = document.createElement('strong');
+  const text = document.createElement('span');
+  name.textContent = `${label}：`;
+  text.textContent = String(value ?? '');
+  line.append(name, text);
+  parent.append(line);
+}
+
+export function renderBatchReport(document, response = {}) {
+  document.querySelector('.gsbd-report')?.remove();
+  const results = Array.isArray(response.results) ? response.results : [];
+  const exportErrors = Array.isArray(response.exportErrors) ? response.exportErrors : [];
+  const counts = Object.fromEntries(Object.keys(REPORT_STATUS).map(status => [
+    status,
+    results.filter(result => result.status === status).length,
+  ]));
+  const panel = document.createElement('aside');
+  panel.className = 'gsbd-report';
+  panel.setAttribute('role', 'region');
+  panel.setAttribute('aria-label', '下载汇报');
+
+  const header = document.createElement('div');
+  header.className = 'gsbd-report-header';
+  const heading = document.createElement('h2');
+  heading.textContent = '下载汇报';
+  const close = document.createElement('button');
+  close.className = 'gsbd-report-close';
+  close.type = 'button';
+  close.textContent = '关闭汇报';
+  close.addEventListener('click', () => panel.remove());
+  header.append(heading, close);
+  panel.append(header);
+
+  const summary = document.createElement('div');
+  summary.className = 'gsbd-report-summary';
+  const total = document.createElement('span');
+  total.className = 'gsbd-report-total';
+  total.textContent = `总数 ${results.length}`;
+  summary.append(total);
+  for (const [status, metadata] of Object.entries(REPORT_STATUS)) {
+    const item = document.createElement('span');
+    item.className = `gsbd-report-${status}`;
+    item.textContent = `${metadata.countLabel} ${counts[status]}`;
+    summary.append(item);
+  }
+  const exportCount = document.createElement('span');
+  exportCount.className = 'gsbd-report-export-count';
+  exportCount.textContent = `导出错误 ${exportErrors.length}`;
+  summary.append(exportCount);
+  panel.append(summary);
+
+  if (exportErrors.length) {
+    const errors = document.createElement('div');
+    errors.className = 'gsbd-report-export-errors';
+    const label = document.createElement('strong');
+    label.textContent = '导出/报告文件错误';
+    errors.append(label);
+    for (const error of exportErrors) {
+      const line = document.createElement('p');
+      line.textContent = `${error.extension || '文件'}：${error.error || '未知错误'}`;
+      errors.append(line);
+    }
+    panel.append(errors);
+  }
+
+  const details = document.createElement('details');
+  const detailsLabel = document.createElement('summary');
+  detailsLabel.textContent = '逐篇明细';
+  const items = document.createElement('div');
+  items.className = 'gsbd-report-items';
+  for (const result of results) {
+    const item = document.createElement('article');
+    item.className = 'gsbd-report-item';
+    item.dataset.status = result.status || '';
+    const title = document.createElement('h3');
+    title.textContent = result.title || '未命名论文';
+    item.append(title);
+    appendReportField(document, item, '状态', REPORT_STATUS[result.status]?.label || result.status || '未知');
+    appendReportField(document, item, '文件名', result.filename || '—');
+    appendReportField(document, item, '来源', result.source || 'scholar');
+    if (result.pdfUrl) appendReportField(document, item, 'PDF URL', result.pdfUrl);
+    if (result.error) appendReportField(document, item, '原因', result.error);
+    items.append(item);
+  }
+  details.append(detailsLabel, items);
+  panel.append(details);
+  document.body.append(panel);
+  return panel;
+}
 
 function showStopMessage(document, reason) {
   const message = document.createElement('div');
@@ -125,9 +223,12 @@ export function initializeScholarUi(document, chromeApi = globalThis.chrome, obs
       const row = document.querySelector(`[data-gsbd-id="${result.id}"]`);
       const status = row?.querySelector('.gsbd-row-status');
       if (!status) continue;
-      status.textContent = result.status === 'metadata' ? '仅元数据' : result.ok ? '成功' : `失败：${result.error || '未知错误'}`;
-      row.classList.toggle('gsbd-success', Boolean(result.ok));
-      row.classList.toggle('gsbd-failure', !result.ok);
+      const label = REPORT_STATUS[result.status]?.label || (result.ok ? '处理完成' : '处理失败');
+      status.textContent = result.error && (result.status === 'failed' || result.status === 'timeout')
+        ? `${label}：${result.error}`
+        : label;
+      row.classList.toggle('gsbd-success', result.status === 'success');
+      row.classList.toggle('gsbd-failure', result.status === 'failed' || result.status === 'timeout');
     }
     toolbar.querySelector('.gsbd-progress').textContent = response?.notice
       || (response?.blocked ? `Scholar detail lookup stopped because of ${response.blocked}.` : '')
@@ -141,12 +242,15 @@ export function initializeScholarUi(document, chromeApi = globalThis.chrome, obs
     }
     setBusy(true);
     if (type === 'RUN_BATCH') {
+      document.querySelector('.gsbd-report')?.remove();
       for (const paper of selected) {
         rowForPaper(paper).querySelector('.gsbd-row-status').textContent = adapter.pendingStatus;
       }
     }
     try {
-      renderResults(await chromeApi.runtime.sendMessage({ type, papers: selected }));
+      const response = await chromeApi.runtime.sendMessage({ type, papers: selected });
+      renderResults(response);
+      if (type === 'RUN_BATCH') renderBatchReport(document, response);
     } catch (error) {
       toolbar.querySelector('.gsbd-progress').textContent = `处理失败：${error?.message || String(error)}`;
       for (const paper of selected) {
