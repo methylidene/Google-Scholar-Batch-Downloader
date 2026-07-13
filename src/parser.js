@@ -1,6 +1,7 @@
 import { normalizePaper } from './model.js';
 
 const ROW_SELECTOR = '.gs_r.gs_or.gs_scl';
+const PROFILE_ROW_SELECTOR = '.gsc_a_tr';
 
 function resolveUrl(href, document) {
   return href ? new URL(href, document.baseURI).href : '';
@@ -62,6 +63,39 @@ export function parseScholarPage(document) {
       doi: findDoi(row, document),
     });
   });
+}
+
+export function isScholarProfile(document) {
+  return Boolean(document.querySelector('#gsc_prf_in'));
+}
+
+export function parseScholarProfile(document) {
+  const owner = document.querySelector('#gsc_prf_in')?.textContent || '';
+
+  return [...document.querySelectorAll(PROFILE_ROW_SELECTOR)].map((row, index) => {
+    const id = `gsbd-profile-${index + 1}`;
+    row.dataset.gsbdId = id;
+
+    const titleAnchor = row.querySelector('.gsc_a_at');
+    const metadata = [...row.querySelectorAll('.gs_gray')];
+    const authorText = metadata[0]?.textContent.trim() || owner;
+    const authors = authorText.split(',').map(author => author.trim()).filter(Boolean);
+
+    return normalizePaper({
+      id,
+      title: titleAnchor?.textContent || '',
+      authors,
+      year: row.querySelector('.gsc_a_y span')?.textContent || '',
+      venue: metadata[1]?.textContent || '',
+      detailUrl: resolveUrl(titleAnchor?.getAttribute('href'), document),
+    });
+  });
+}
+
+export function getScholarPageType(document) {
+  if (document.querySelector(ROW_SELECTOR)) return 'results';
+  if (isScholarProfile(document)) return 'profile';
+  return 'unknown';
 }
 
 export function detectScholarBlock(document) {
