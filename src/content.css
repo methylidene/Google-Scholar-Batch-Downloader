@@ -53,6 +53,11 @@
   font-size: 12px;
 }
 
+.gsc_a_tr .gsbd-row-control {
+  margin: 4px 8px 4px 0;
+  vertical-align: top;
+}
+
 .gsbd-success .gsbd-row-status {
   color: #137333;
 }

@@ -15,7 +15,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://scholar.google.com/scholar*"],
+      "matches": [
+        "https://scholar.google.com/scholar*",
+        "https://scholar.google.com/citations*"
+      ],
       "js": ["src/content-loader.js"],
       "css": ["src/content.css"]
     }
