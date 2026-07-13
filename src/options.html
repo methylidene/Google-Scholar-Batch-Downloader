@@ -20,8 +20,8 @@
       <input id="download-delay" type="number" min="300" max="5000" step="1" required>
     </label>
     <p class="note">允许范围 300–5000，默认 800。适当增大间隔可减少连续请求。</p>
-    <label><input id="enable-oa" type="checkbox"> 启用开放获取查询（实验性，预留功能）</label>
-    <p class="note">此开关默认为关闭；当前版本仅保存设置，不执行额外开放获取查询。</p>
+    <label><input id="enable-arxiv" type="checkbox"> Scholar 下载失败后启用 arXiv 备用源</label>
+    <p class="note">默认开启。扩展只为未找到 PDF 或明确下载失败的论文串行查询 arXiv；严格匹配 DOI 或标题，API 请求间隔至少 3 秒。</p>
     <button id="save" type="button">保存</button>
     <p id="status" role="status" aria-live="polite"></p>
   </main>

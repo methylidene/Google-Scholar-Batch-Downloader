@@ -1,4 +1,29 @@
 const ARXIV_API_URL = 'https://export.arxiv.org/api/query';
+const defaultSleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+export function createArxivRequestScheduler(options = {}) {
+  const sleep = options.sleep || defaultSleep;
+  const now = options.now || Date.now;
+  const minimumDelayMs = Math.max(3000, Number(options.minimumDelayMs) || 3000);
+  let tail = Promise.resolve();
+  let lastStartedAt = null;
+
+  return (fetchImpl, url, init) => {
+    const run = async () => {
+      if (lastStartedAt !== null) {
+        const remaining = minimumDelayMs - (now() - lastStartedAt);
+        if (remaining > 0) await sleep(remaining);
+      }
+      lastStartedAt = now();
+      return fetchImpl(url, init);
+    };
+    const request = tail.then(run, run);
+    tail = request.then(() => undefined, () => undefined);
+    return request;
+  };
+}
+
+const defaultRequestScheduler = createArxivRequestScheduler();
 
 const decodeXml = value => String(value ?? '').replace(
   /&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi,
@@ -96,15 +121,17 @@ export function selectArxivMatch(paper, candidates) {
 
 export async function findArxivMatchesSequentially(papers, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const sleep = options.sleep || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
   const delayMs = Math.max(3000, Number(options.delayMs) || 3000);
+  const request = options.request || (options.sleep || options.now
+    ? createArxivRequestScheduler({ sleep: options.sleep, now: options.now, minimumDelayMs: delayMs })
+    : defaultRequestScheduler);
   const results = [];
 
   for (let index = 0; index < papers.length; index += 1) {
     const paper = papers[index];
     try {
       if (!String(paper?.title || '').trim()) throw new Error('论文标题为空');
-      const response = await fetchImpl(buildArxivQueryUrl(paper), {
+      const response = await request(fetchImpl, buildArxivQueryUrl(paper), {
         headers: { Accept: 'application/atom+xml' },
       });
       if (!response.ok) throw new Error(`arXiv API HTTP ${response.status}`);
@@ -119,7 +146,6 @@ export async function findArxivMatchesSequentially(papers, options = {}) {
         error: error?.message || String(error),
       });
     }
-    if (index < papers.length - 1) await sleep(delayMs);
   }
   return results;
 }

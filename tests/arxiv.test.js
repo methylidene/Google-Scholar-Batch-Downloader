@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildArxivQueryUrl,
+  createArxivRequestScheduler,
   findArxivMatchesSequentially,
   parseArxivFeed,
   selectArxivMatch,
@@ -63,6 +64,7 @@ test('prefers an exact DOI match over title and otherwise requires an exact norm
 test('searches sequentially, waits three seconds between calls, and continues after errors', async () => {
   const requests = [];
   const delays = [];
+  let clock = 0;
   const papers = [
     { id: 'p1', title: 'First', authors: [], doi: '' },
     { id: 'p2', title: 'Second', authors: [], doi: '' },
@@ -75,7 +77,8 @@ test('searches sequentially, waits three seconds between calls, and continues af
       const title = url.includes('First') ? 'First' : 'Unrelated';
       return { ok: true, text: async () => feed([entry({ id: title.toLowerCase(), title })]) };
     },
-    sleep: async milliseconds => delays.push(milliseconds),
+    sleep: async milliseconds => { delays.push(milliseconds); clock += milliseconds; },
+    now: () => clock,
   });
 
   assert.equal(requests.length, 3);
@@ -83,6 +86,38 @@ test('searches sequentially, waits three seconds between calls, and continues af
   assert.deepEqual(results.map(result => result.status), ['matched', 'lookup_failed', 'not_found']);
   assert.equal(results[0].match.arxivId, 'first');
   assert.match(results[1].error, /offline/);
+});
+
+test('globally queues concurrent API calls with one connection and a three-second gap', async () => {
+  let clock = 0;
+  const delays = [];
+  const starts = [];
+  let releaseFirst;
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  const scheduler = createArxivRequestScheduler({
+    now: () => clock,
+    sleep: async milliseconds => { delays.push(milliseconds); clock += milliseconds; },
+  });
+  const first = scheduler(async () => {
+    starts.push({ name: 'first', clock });
+    await firstGate;
+    return { ok: true };
+  }, 'https://export.arxiv.org/api/query?first');
+  const second = scheduler(async () => {
+    starts.push({ name: 'second', clock });
+    return { ok: true };
+  }, 'https://export.arxiv.org/api/query?second');
+
+  await Promise.resolve();
+  assert.deepEqual(starts, [{ name: 'first', clock: 0 }]);
+  releaseFirst();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(delays, [3000]);
+  assert.deepEqual(starts, [
+    { name: 'first', clock: 0 },
+    { name: 'second', clock: 3000 },
+  ]);
 });
 
 test('treats non-success API responses as per-paper lookup failures', async () => {

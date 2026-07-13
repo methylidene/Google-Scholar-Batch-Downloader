@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Google Scholar Batch Downloader",
-  "description": "在 Google Scholar 搜索结果页和作者主页选择论文、下载公开 PDF，并导出书目信息。",
-  "version": "1.2.0",
+  "description": "在 Google Scholar 选择论文，下载公开 PDF，并在失败时从 arXiv 查找备用版本。",
+  "version": "1.3.0",
   "permissions": ["downloads", "storage"],
   "host_permissions": [
     "https://scholar.google.com/*",
     "https://scholar.googleusercontent.com/*",
+    "https://export.arxiv.org/*",
+    "https://arxiv.org/*",
     "http://127.0.0.1:23119/*"
   ],
   "background": {

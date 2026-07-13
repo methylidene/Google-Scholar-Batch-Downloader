@@ -14,6 +14,14 @@ const REPORT_STATUS = {
   failed: { label: '下载失败', countLabel: '下载失败' },
   timeout: { label: '下载超时', countLabel: '下载超时' },
 };
+const FALLBACK_STATUS = {
+  success: '下载成功',
+  not_found: '未找到严格匹配',
+  lookup_failed: '检索失败',
+  failed: '下载失败',
+  timeout: '下载超时',
+  not_needed: '未触发',
+};
 
 function appendReportField(document, parent, label, value) {
   const line = document.createElement('p');
@@ -66,6 +74,10 @@ export function renderBatchReport(document, response = {}) {
   exportCount.className = 'gsbd-report-export-count';
   exportCount.textContent = `导出错误 ${exportErrors.length}`;
   summary.append(exportCount);
+  const arxivSuccess = document.createElement('span');
+  arxivSuccess.className = 'gsbd-report-arxiv-success';
+  arxivSuccess.textContent = `arXiv 成功 ${results.filter(result => result.source === 'arxiv' && result.status === 'success').length}`;
+  summary.append(arxivSuccess);
   panel.append(summary);
 
   if (exportErrors.length) {
@@ -97,8 +109,18 @@ export function renderBatchReport(document, response = {}) {
     appendReportField(document, item, '状态', REPORT_STATUS[result.status]?.label || result.status || '未知');
     appendReportField(document, item, '文件名', result.filename || '—');
     appendReportField(document, item, '来源', result.source || 'scholar');
+    if (result.scholarStatus) {
+      appendReportField(document, item, 'Scholar 结果', REPORT_STATUS[result.scholarStatus]?.label || result.scholarStatus);
+    }
+    if (result.fallbackStatus && result.fallbackStatus !== 'not_needed') {
+      appendReportField(document, item, 'arXiv 结果', FALLBACK_STATUS[result.fallbackStatus] || result.fallbackStatus);
+    }
+    if (result.arxivId) appendReportField(document, item, 'arXiv ID', result.arxivId);
     if (result.pdfUrl) appendReportField(document, item, 'PDF URL', result.pdfUrl);
     if (result.error) appendReportField(document, item, '原因', result.error);
+    if (result.fallbackError && result.fallbackError !== result.error) {
+      appendReportField(document, item, 'arXiv 原因', result.fallbackError);
+    }
     items.append(item);
   }
   details.append(detailsLabel, items);
@@ -223,7 +245,8 @@ export function initializeScholarUi(document, chromeApi = globalThis.chrome, obs
       const row = document.querySelector(`[data-gsbd-id="${result.id}"]`);
       const status = row?.querySelector('.gsbd-row-status');
       if (!status) continue;
-      const label = REPORT_STATUS[result.status]?.label || (result.ok ? '处理完成' : '处理失败');
+      const baseLabel = REPORT_STATUS[result.status]?.label || (result.ok ? '处理完成' : '处理失败');
+      const label = result.source === 'arxiv' ? `${baseLabel}（arXiv）` : baseLabel;
       status.textContent = result.error && (result.status === 'failed' || result.status === 'timeout')
         ? `${label}：${result.error}`
         : label;

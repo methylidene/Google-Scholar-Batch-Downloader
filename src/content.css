@@ -136,6 +136,7 @@
 }
 
 .gsbd-report-success,
+.gsbd-report-arxiv-success,
 .gsbd-report-item[data-status="success"] h3 {
   color: #137333;
 }

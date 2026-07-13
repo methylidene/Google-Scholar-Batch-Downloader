@@ -239,6 +239,24 @@ test('RUN_BATCH downloads an exact arXiv fallback when enabled', async () => {
   assert.equal(response.fallbackResults[0].status, 'matched');
 });
 
+test('RUN_BATCH skips arXiv requests when the fallback setting is disabled', async () => {
+  let fetches = 0;
+  const downloaded = [];
+  const response = await runBatch(
+    [{ id: 'p1', title: 'Metadata Only', authors: [], year: '', pdfUrl: '' }],
+    {
+      storage: { local: { get: async () => ({ downloadDelayMs: 300, enableArxivFallback: false }) } },
+      downloads: { download: async options => { downloaded.push(options); return downloaded.length; } },
+    },
+    { fetchImpl: async () => { fetches += 1; throw new Error('should not fetch'); } },
+  );
+
+  assert.equal(fetches, 0);
+  assert.equal(response.results[0].status, 'no_pdf');
+  assert.equal(response.results[0].fallbackStatus, 'not_needed');
+  assert.deepEqual(response.fallbackResults, []);
+});
+
 test('retries a start failure once and continues later PDF downloads', async () => {
   const attempts = [];
   const downloads = makeDownloadApi(async (options, id) => {

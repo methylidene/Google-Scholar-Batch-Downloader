@@ -9,9 +9,9 @@ const fixture = name => readFile(new URL(`fixtures/${name}`, import.meta.url), '
 const mixedResponse = {
   ok: false,
   results: [
-    { id: 'p1', title: 'Downloaded', authors: ['Ada'], year: '1843', status: 'success', source: 'scholar', filename: 'Ada - Downloaded.pdf', pdfUrl: 'https://files.test/one.pdf', downloadId: 1, error: '' },
-    { id: 'p2', title: 'Metadata', authors: ['Bob'], year: '2025', status: 'no_pdf', source: 'scholar', filename: '', pdfUrl: '', downloadId: null, error: '' },
-    { id: 'p3', title: 'Interrupted', authors: [], year: '', status: 'failed', source: 'scholar', filename: 'Interrupted.pdf', pdfUrl: 'https://files.test/three.pdf', downloadId: 3, error: 'NETWORK_FAILED' },
+    { id: 'p1', title: 'Downloaded', authors: ['Ada'], year: '1843', status: 'success', source: 'arxiv', filename: 'Ada - Downloaded.pdf', pdfUrl: 'https://arxiv.org/pdf/2401.1', downloadId: 1, error: '', scholarStatus: 'no_pdf', scholarError: '', fallbackStatus: 'success', fallbackError: '', arxivId: '2401.1' },
+    { id: 'p2', title: 'Metadata', authors: ['Bob'], year: '2025', status: 'no_pdf', source: 'scholar', filename: '', pdfUrl: '', downloadId: null, error: '', scholarStatus: 'no_pdf', fallbackStatus: 'not_found', fallbackError: '' },
+    { id: 'p3', title: 'Interrupted', authors: [], year: '', status: 'failed', source: 'scholar', filename: 'Interrupted.pdf', pdfUrl: 'https://files.test/three.pdf', downloadId: 3, error: 'NETWORK_FAILED', scholarStatus: 'failed', fallbackStatus: 'lookup_failed', fallbackError: 'arXiv API HTTP 503' },
     { id: 'p4', title: 'Slow', authors: [], year: '', status: 'timeout', source: 'scholar', filename: 'Slow.pdf', pdfUrl: 'https://files.test/four.pdf', downloadId: 4, error: '等待超过 240 秒' },
   ],
   exportErrors: [{ extension: 'csv', error: 'download blocked' }],
@@ -27,10 +27,14 @@ test('renders mixed batch counts, paper details, and separate export errors', ()
   assert.equal(panel.querySelector('.gsbd-report-no_pdf').textContent, '未找到 PDF 1');
   assert.equal(panel.querySelector('.gsbd-report-failed').textContent, '下载失败 1');
   assert.equal(panel.querySelector('.gsbd-report-timeout').textContent, '下载超时 1');
+  assert.equal(panel.querySelector('.gsbd-report-arxiv-success').textContent, 'arXiv 成功 1');
   assert.equal(panel.querySelectorAll('.gsbd-report-item').length, 4);
   assert.match(panel.querySelector('[data-status="failed"]').textContent, /Interrupted/);
   assert.match(panel.querySelector('[data-status="failed"]').textContent, /NETWORK_FAILED/);
-  assert.match(panel.querySelector('[data-status="success"]').textContent, /scholar/);
+  assert.match(panel.querySelector('[data-status="success"]').textContent, /arxiv/);
+  assert.match(panel.querySelector('[data-status="success"]').textContent, /2401\.1/);
+  assert.match(panel.querySelector('[data-status="success"]').textContent, /Scholar 结果：未找到 PDF/);
+  assert.match(panel.querySelector('[data-status="failed"]').textContent, /arXiv API HTTP 503/);
   assert.match(panel.querySelector('.gsbd-report-export-errors').textContent, /csv：download blocked/);
 });
 

@@ -1,4 +1,4 @@
-const DEFAULTS = { downloadDelayMs: 800, enableOpenAccessLookup: false };
+const DEFAULTS = { downloadDelayMs: 800, enableArxivFallback: true };
 
 export function normalizeDelay(value) {
   const delay = Number(value);
@@ -7,7 +7,7 @@ export function normalizeDelay(value) {
 
 export async function initializeOptionsPage(document, chromeApi = chrome) {
   const delayInput = document.querySelector('#download-delay');
-  const oaInput = document.querySelector('#enable-oa');
+  const arxivInput = document.querySelector('#enable-arxiv');
   const saveButton = document.querySelector('#save');
   const status = document.querySelector('#status');
   let settings;
@@ -19,7 +19,7 @@ export async function initializeOptionsPage(document, chromeApi = chrome) {
   }
 
   delayInput.value = String(normalizeDelay(settings.downloadDelayMs));
-  oaInput.checked = settings.enableOpenAccessLookup === true;
+  arxivInput.checked = settings.enableArxivFallback !== false;
 
   saveButton.addEventListener('click', async () => {
     const delay = Number(delayInput.value);
@@ -31,7 +31,7 @@ export async function initializeOptionsPage(document, chromeApi = chrome) {
     try {
       await chromeApi.storage.local.set({
         downloadDelayMs: delay,
-        enableOpenAccessLookup: oaInput.checked,
+        enableArxivFallback: arxivInput.checked,
       });
       status.textContent = '设置已保存。';
     } catch (error) {

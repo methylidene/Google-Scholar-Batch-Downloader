@@ -180,7 +180,7 @@ export async function applyArxivFallbacks(papers, scholarResults, chromeApi = ch
   const findMatches = dependencies.findMatches || findArxivMatchesSequentially;
   const lookups = await findMatches(eligible, {
     fetchImpl: dependencies.fetchImpl || globalThis.fetch,
-    sleep: dependencies.sleep || sleep,
+    ...(dependencies.sleep ? { sleep: dependencies.sleep } : {}),
     delayMs: 3000,
   });
   const lookupById = new Map(lookups.map(lookup => [lookup.id, lookup]));
