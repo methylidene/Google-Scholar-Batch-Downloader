@@ -71,6 +71,7 @@ export function initializeScholarUi(document, chromeApi = globalThis.chrome, obs
     <button class="gsbd-zotero" type="button">发送到 Zotero</button>
     <span class="gsbd-count">已选 0 篇</span>
     <span class="gsbd-progress" role="status"></span>`;
+  toolbar.querySelector('.gsbd-select-pdf').hidden = pageType === 'profile';
   document.body.append(toolbar);
 
   const rowForPaper = paper => document.querySelector(`[data-gsbd-id="${paper.id}"]`);

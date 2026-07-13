@@ -59,7 +59,6 @@ export async function enrichPapersSequentially(papers, {
     if (results.length) await sleep(delayMs);
     try {
       const response = await fetchImpl(paper.detailUrl);
-      if (!response.ok) throw new Error(`HTTP response was not successful`);
       const contentType = response.headers?.get?.('content-type') || '';
       if (!/^text\/html\b/i.test(contentType)) throw new Error(`Expected HTML response, received ${contentType || 'unknown content type'}`);
       const detail = parseCitationDetail(await response.text(), paper.detailUrl);
@@ -68,6 +67,7 @@ export async function enrichPapersSequentially(papers, {
         results.push({ id: paper.id, ok: false, status: 'blocked', blocked });
         break;
       }
+      if (!response.ok) throw new Error(`HTTP response was not successful`);
       enriched[index] = {
         ...paper,
         pdfUrl: paper.pdfUrl || detail.pdfUrl,

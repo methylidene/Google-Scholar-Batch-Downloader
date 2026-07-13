@@ -18,6 +18,20 @@ test('citation details accept explicit PDF and PDF paths with query strings, but
   assert.equal(html.pdfUrl, '');
 });
 
+test('citation details accept trimmed PDF marker prefixes including adjacent tag text', () => {
+  const publisher = parseCitationDetail(
+    '<a href="/download?id=publisher">  [PDF] publisher.example</a>',
+    'https://scholar.google.com/citations',
+  );
+  const adjacent = parseCitationDetail(
+    '<a href="/download?id=adjacent"><span>[PDF]</span>files.example</a>',
+    'https://scholar.google.com/citations',
+  );
+
+  assert.equal(publisher.pdfUrl, 'https://scholar.google.com/download?id=publisher');
+  assert.equal(adjacent.pdfUrl, 'https://scholar.google.com/download?id=adjacent');
+});
+
 test('citation details read the actual href attribute rather than data-href suffixes', () => {
   const detail = parseCitationDetail(
     '<a data-href="https://attacker.test/file.pdf" href="/landing">Landing</a>',
@@ -102,6 +116,37 @@ test('an unsuccessful HTTP response is an ordinary failure and later papers cont
   assert.equal(result.papers[1].pdfUrl, 'https://scholar.google.com/two.pdf');
   assert.deepEqual(result.results.map(item => item.ok), [false, true]);
 });
+
+for (const [status, body, expectedBlock] of [
+  [429, '<form id="gs_captcha_f"></form>', 'captcha'],
+  [503, '<main>Our systems have detected abnormal traffic from your computer network.</main>', 'traffic'],
+]) {
+  test(`a blocked HTML response with HTTP ${status} stops later fetches`, async () => {
+    const calls = [];
+    const papers = [1, 2].map(id => ({
+      id: String(id),
+      detailUrl: `https://scholar.google.com/detail/${id}`,
+      pdfUrl: '',
+      doi: '',
+    }));
+
+    const result = await enrichPapersSequentially(papers, {
+      fetchImpl: async url => {
+        calls.push(url);
+        return calls.length === 1
+          ? htmlResponse(body, { ok: false })
+          : htmlResponse('<a href="/two.pdf">[PDF]</a>');
+      },
+      delayMs: 0,
+      sleep: async () => {},
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(result.blocked, expectedBlock);
+    assert.deepEqual(result.results.map(item => item.status), ['blocked']);
+    assert.equal(result.papers[1], papers[1]);
+  });
+}
 
 test('a blocked response stops later fetches and retains remaining papers', async () => {
   const calls = [];

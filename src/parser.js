@@ -15,7 +15,7 @@ export function pdfCandidateUrl(href, text, baseUrl) {
     return '';
   }
   const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
-  const isExplicitPdf = String(text || '').trim().toUpperCase() === '[PDF]';
+  const isExplicitPdf = String(text || '').trim().toUpperCase().startsWith('[PDF]');
   const hasPdfPath = /\.pdf$/i.test(url.pathname);
   return isHttp && (isExplicitPdf || hasPdfPath) ? url.href : '';
 }

@@ -51,6 +51,17 @@ test('accepts only explicit PDF links or http PDF paths', () => {
   assert.equal(papers[3].pdfUrl, '');
 });
 
+test('accepts trimmed PDF marker prefixes in search results', () => {
+  const dom = new JSDOM(`
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt"><a href="/paper/one">One</a></h3><a href="/download?id=one">  [PDF] publisher.example</a></div>
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt"><a href="/paper/two">Two</a></h3><a href="/download?id=two"><span>[PDF]</span>files.example</a></div>`,
+    { url: 'https://scholar.google.com/scholar?q=test' });
+
+  const papers = parseScholarPage(dom.window.document);
+  assert.equal(papers[0].pdfUrl, 'https://scholar.google.com/download?id=one');
+  assert.equal(papers[1].pdfUrl, 'https://scholar.google.com/download?id=two');
+});
+
 test('extracts DOI only from explicit DOI text or doi.org links', () => {
   const dom = new JSDOM(`
     <div class="gs_r gs_or gs_scl"><h3 class="gs_rt">One</h3><div class="gs_rs">DOI: 10.1000/xyz-123.</div></div>

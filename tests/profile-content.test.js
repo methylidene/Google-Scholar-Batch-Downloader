@@ -83,6 +83,20 @@ test('select all and none operate on profile rows', async () => {
   assert.match(document.querySelector('.gsbd-count').textContent, /0/);
 });
 
+test('hides the PDF-only action on profiles while keeping it on result pages', async () => {
+  const { document: profileDocument } = await makeProfile();
+  assert.equal(profileDocument.querySelector('.gsbd-select-pdf').hidden, true);
+
+  const resultsDom = new JSDOM(await fixture('scholar-results.html'), {
+    url: 'https://scholar.google.com/scholar?q=test',
+  });
+  initializeScholarUi(resultsDom.window.document, {
+    runtime: { sendMessage: async () => ({ ok: true, results: [] }) },
+  });
+
+  assert.equal(resultsDom.window.document.querySelector('.gsbd-select-pdf').hidden, false);
+});
+
 test('sends selected profile papers and marks them as looking up details', async () => {
   let message;
   let resolveMessage;
