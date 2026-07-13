@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Google Scholar Batch Downloader",
-  "description": "在 Google Scholar 选择论文，下载公开 PDF，并在失败时从 arXiv 查找备用版本。",
-  "version": "1.3.0",
+  "description": "在 Google Scholar 选择论文，下载公开 PDF，并依次从 arXiv 与 Unpaywall 查找开放版本。",
+  "version": "1.4.0",
   "permissions": ["downloads", "storage"],
   "host_permissions": [
     "https://scholar.google.com/*",
     "https://scholar.googleusercontent.com/*",
     "https://export.arxiv.org/*",
     "https://arxiv.org/*",
+    "https://api.unpaywall.org/*",
     "http://127.0.0.1:23119/*"
   ],
   "background": {

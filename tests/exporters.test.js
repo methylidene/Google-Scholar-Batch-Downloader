@@ -74,7 +74,7 @@ test('exports batch results as UTF-8 BOM CSV with stable columns', () => {
   const csv = toCsv([result]);
 
   assert.equal(csv.charCodeAt(0), 0xFEFF);
-  assert.equal(csv.slice(1).split('\r\n')[0], 'title,authors,year,status,source,pdfUrl,filename,downloadId,error,startedAt,finishedAt,scholarStatus,scholarError,fallbackStatus,fallbackError,arxivId');
+  assert.equal(csv.slice(1).split('\r\n')[0], 'title,authors,year,status,source,pdfUrl,filename,downloadId,error,startedAt,finishedAt,scholarStatus,scholarError,fallbackStatus,fallbackError,arxivId,unpaywallStatus,unpaywallError,unpaywallDoi,unpaywallHostType,unpaywallLicense,unpaywallVersion,unpaywallRepository,unpaywallOaStatus');
   assert.match(csv, /"论文, ""测试"""/);
   assert.match(csv, /张三；李四/);
   assert.match(csv, /"https:\/\/example\.test\/paper\.pdf\?name=a,b"/);

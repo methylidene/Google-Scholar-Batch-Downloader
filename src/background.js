@@ -3,6 +3,7 @@ import { toBibTeX, toCsv, toDataUrl, toResultJson, toRis } from './exporters.js'
 import { buildZoteroRequest } from './zotero.js';
 import { enrichPapersSequentially } from './enrichment.js';
 import { findArxivMatchesSequentially } from './arxiv.js';
+import { findUnpaywallMatchesSequentially } from './unpaywall.js';
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -58,6 +59,12 @@ const makeResult = (paper, now) => ({
   status: '',
   source: paper.source || 'scholar',
   arxivId: paper.arxivId || '',
+  unpaywallDoi: paper.unpaywallDoi || '',
+  unpaywallHostType: paper.unpaywallHostType || '',
+  unpaywallLicense: paper.unpaywallLicense || '',
+  unpaywallVersion: paper.unpaywallVersion || '',
+  unpaywallRepository: paper.unpaywallRepository || '',
+  unpaywallOaStatus: paper.unpaywallOaStatus || '',
   pdfUrl: paper.pdfUrl || '',
   filename: paper.pdfUrl ? buildPdfFilename(paper) : '',
   downloadId: null,
@@ -231,10 +238,95 @@ export async function applyArxivFallbacks(papers, scholarResults, chromeApi = ch
   return { results, lookups };
 }
 
+const withUnpaywallAttempt = result => ({
+  ...result,
+  unpaywallStatus: result.unpaywallStatus || 'not_needed',
+  unpaywallError: result.unpaywallError || '',
+  unpaywallDoi: result.unpaywallDoi || '',
+  unpaywallHostType: result.unpaywallHostType || '',
+  unpaywallLicense: result.unpaywallLicense || '',
+  unpaywallVersion: result.unpaywallVersion || '',
+  unpaywallRepository: result.unpaywallRepository || '',
+  unpaywallOaStatus: result.unpaywallOaStatus || '',
+});
+
+export async function applyUnpaywallFallbacks(papers, priorResults, email, chromeApi = chrome, dependencies = {}) {
+  const paperById = new Map(papers.map(paper => [paper.id, paper]));
+  const baseResults = priorResults.map(withUnpaywallAttempt);
+  const eligible = baseResults
+    .filter(result => result.status === 'no_pdf' || result.status === 'failed')
+    .map(result => paperById.get(result.id))
+    .filter(Boolean);
+  if (!eligible.length) return { results: baseResults, lookups: [] };
+
+  const findMatches = dependencies.findMatches || findUnpaywallMatchesSequentially;
+  const lookups = await findMatches(eligible, {
+    email,
+    fetchImpl: dependencies.fetchImpl || globalThis.fetch,
+  });
+  const lookupById = new Map(lookups.map(lookup => [lookup.id, lookup]));
+  const matchedPapers = lookups.flatMap(lookup => {
+    if (lookup.status !== 'matched') return [];
+    const paper = paperById.get(lookup.id);
+    const match = lookup.match;
+    return paper ? [{
+      ...paper,
+      source: 'unpaywall',
+      pdfUrl: match.pdfUrl,
+      detailUrl: match.landingUrl || paper.detailUrl,
+      unpaywallDoi: match.doi,
+      unpaywallHostType: match.hostType,
+      unpaywallLicense: match.license,
+      unpaywallVersion: match.version,
+      unpaywallRepository: match.repositoryInstitution,
+      unpaywallOaStatus: match.oaStatus,
+    }] : [];
+  });
+  const downloads = matchedPapers.length ? await downloadPapers(matchedPapers, chromeApi, dependencies) : [];
+  const downloadById = new Map(downloads.map(result => [result.id, result]));
+
+  return {
+    lookups,
+    results: baseResults.map(result => {
+      const lookup = lookupById.get(result.id);
+      if (!lookup) return result;
+      if (lookup.status !== 'matched') return {
+        ...result,
+        unpaywallStatus: lookup.status,
+        unpaywallError: lookup.error || '',
+      };
+      const fallback = downloadById.get(result.id);
+      if (!fallback) return {
+        ...result,
+        unpaywallStatus: 'failed',
+        unpaywallError: 'Unpaywall 匹配成功，但未创建下载结果',
+        unpaywallDoi: lookup.match.doi,
+      };
+      return {
+        ...fallback,
+        scholarStatus: result.scholarStatus,
+        scholarError: result.scholarError,
+        fallbackStatus: result.fallbackStatus,
+        fallbackError: result.fallbackError,
+        arxivId: result.arxivId,
+        unpaywallStatus: fallback.status,
+        unpaywallError: fallback.error || '',
+      };
+    }),
+  };
+}
+
 export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
-  const { downloadDelayMs = 800, enableArxivFallback = true } = await chromeApi.storage.local.get({
+  const {
+    downloadDelayMs = 800,
+    enableArxivFallback = true,
+    enableUnpaywallFallback = true,
+    unpaywallEmail = '',
+  } = await chromeApi.storage.local.get({
     downloadDelayMs: 800,
     enableArxivFallback: true,
+    enableUnpaywallFallback: true,
+    unpaywallEmail: '',
   });
   const delay = normalizeDownloadDelay(downloadDelayMs);
   const profileIndexes = papers.flatMap((paper, index) => isProfileDetailCandidate(paper) ? [index] : []);
@@ -257,7 +349,13 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
       downloadDelayMs: delay,
     })
     : { results: scholarResults.map(withScholarAttempt), lookups: [] };
-  const results = fallback.results;
+  const unpaywall = enableUnpaywallFallback
+    ? await applyUnpaywallFallbacks(batchPapers, fallback.results, unpaywallEmail, chromeApi, {
+      ...dependencies,
+      downloadDelayMs: delay,
+    })
+    : { results: fallback.results.map(withUnpaywallAttempt), lookups: [] };
+  const results = unpaywall.results;
 
   const exportErrors = [];
   for (const file of makeBatchFiles(batchPapers, results)) {
@@ -275,6 +373,7 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
       exportErrors,
       enrichmentResults: enrichment.results,
       fallbackResults: fallback.lookups,
+      unpaywallResults: unpaywall.lookups,
       blocked: enrichment.blocked,
       notice: enrichment.blocked ? `Scholar detail lookup stopped because of ${enrichment.blocked === 'captcha' ? 'CAPTCHA' : 'abnormal traffic'}.` : '',
     };
@@ -284,6 +383,7 @@ export async function runBatch(papers, chromeApi = chrome, dependencies = {}) {
     results,
     enrichmentResults: enrichment.results,
     fallbackResults: fallback.lookups,
+    unpaywallResults: unpaywall.lookups,
     blocked: enrichment.blocked,
     notice: enrichment.blocked ? `Scholar detail lookup stopped because of ${enrichment.blocked === 'captcha' ? 'CAPTCHA' : 'abnormal traffic'}.` : '',
   };

@@ -18,6 +18,8 @@ const FALLBACK_STATUS = {
   success: '下载成功',
   not_found: '未找到严格匹配',
   lookup_failed: '检索失败',
+  missing_doi: '缺少 DOI',
+  not_configured: '未配置联系邮箱',
   failed: '下载失败',
   timeout: '下载超时',
   not_needed: '未触发',
@@ -78,6 +80,10 @@ export function renderBatchReport(document, response = {}) {
   arxivSuccess.className = 'gsbd-report-arxiv-success';
   arxivSuccess.textContent = `arXiv 成功 ${results.filter(result => result.source === 'arxiv' && result.status === 'success').length}`;
   summary.append(arxivSuccess);
+  const unpaywallSuccess = document.createElement('span');
+  unpaywallSuccess.className = 'gsbd-report-unpaywall-success';
+  unpaywallSuccess.textContent = `Unpaywall 成功 ${results.filter(result => result.source === 'unpaywall' && result.status === 'success').length}`;
+  summary.append(unpaywallSuccess);
   panel.append(summary);
 
   if (exportErrors.length) {
@@ -120,6 +126,18 @@ export function renderBatchReport(document, response = {}) {
     if (result.error) appendReportField(document, item, '原因', result.error);
     if (result.fallbackError && result.fallbackError !== result.error) {
       appendReportField(document, item, 'arXiv 原因', result.fallbackError);
+    }
+    if (result.unpaywallStatus && result.unpaywallStatus !== 'not_needed') {
+      appendReportField(document, item, 'Unpaywall 结果', FALLBACK_STATUS[result.unpaywallStatus] || result.unpaywallStatus);
+    }
+    if (result.unpaywallDoi) appendReportField(document, item, 'Unpaywall DOI', result.unpaywallDoi);
+    if (result.unpaywallHostType) appendReportField(document, item, 'OA 来源类型', result.unpaywallHostType);
+    if (result.unpaywallRepository) appendReportField(document, item, 'OA 仓储机构', result.unpaywallRepository);
+    if (result.unpaywallLicense) appendReportField(document, item, 'OA 许可', result.unpaywallLicense);
+    if (result.unpaywallVersion) appendReportField(document, item, 'OA 版本', result.unpaywallVersion);
+    if (result.unpaywallOaStatus) appendReportField(document, item, 'OA 状态', result.unpaywallOaStatus);
+    if (result.unpaywallError && result.unpaywallError !== result.error) {
+      appendReportField(document, item, 'Unpaywall 原因', result.unpaywallError);
     }
     items.append(item);
   }
@@ -246,7 +264,8 @@ export function initializeScholarUi(document, chromeApi = globalThis.chrome, obs
       const status = row?.querySelector('.gsbd-row-status');
       if (!status) continue;
       const baseLabel = REPORT_STATUS[result.status]?.label || (result.ok ? '处理完成' : '处理失败');
-      const label = result.source === 'arxiv' ? `${baseLabel}（arXiv）` : baseLabel;
+      const sourceLabel = result.source === 'arxiv' ? 'arXiv' : result.source === 'unpaywall' ? 'Unpaywall' : '';
+      const label = sourceLabel ? `${baseLabel}（${sourceLabel}）` : baseLabel;
       status.textContent = result.error && (result.status === 'failed' || result.status === 'timeout')
         ? `${label}：${result.error}`
         : label;

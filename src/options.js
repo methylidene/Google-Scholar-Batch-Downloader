@@ -1,4 +1,6 @@
-const DEFAULTS = { downloadDelayMs: 800, enableArxivFallback: true };
+import { isValidUnpaywallEmail } from './unpaywall.js';
+
+const DEFAULTS = { downloadDelayMs: 800, enableArxivFallback: true, enableUnpaywallFallback: true, unpaywallEmail: '' };
 
 export function normalizeDelay(value) {
   const delay = Number(value);
@@ -8,6 +10,8 @@ export function normalizeDelay(value) {
 export async function initializeOptionsPage(document, chromeApi = chrome) {
   const delayInput = document.querySelector('#download-delay');
   const arxivInput = document.querySelector('#enable-arxiv');
+  const unpaywallInput = document.querySelector('#enable-unpaywall');
+  const emailInput = document.querySelector('#unpaywall-email');
   const saveButton = document.querySelector('#save');
   const status = document.querySelector('#status');
   let settings;
@@ -20,6 +24,8 @@ export async function initializeOptionsPage(document, chromeApi = chrome) {
 
   delayInput.value = String(normalizeDelay(settings.downloadDelayMs));
   arxivInput.checked = settings.enableArxivFallback !== false;
+  unpaywallInput.checked = settings.enableUnpaywallFallback !== false;
+  emailInput.value = String(settings.unpaywallEmail || '');
 
   saveButton.addEventListener('click', async () => {
     const delay = Number(delayInput.value);
@@ -27,11 +33,18 @@ export async function initializeOptionsPage(document, chromeApi = chrome) {
       status.textContent = '下载间隔必须是 300 到 5000 之间的整数。';
       return;
     }
+    const email = emailInput.value.trim();
+    if (unpaywallInput.checked && !isValidUnpaywallEmail(email)) {
+      status.textContent = '启用 Unpaywall 时必须填写有效的联系邮箱。';
+      return;
+    }
 
     try {
       await chromeApi.storage.local.set({
         downloadDelayMs: delay,
         enableArxivFallback: arxivInput.checked,
+        enableUnpaywallFallback: unpaywallInput.checked,
+        unpaywallEmail: email,
       });
       status.textContent = '设置已保存。';
     } catch (error) {

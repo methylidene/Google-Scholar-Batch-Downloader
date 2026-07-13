@@ -57,6 +57,20 @@ test('writes untrusted report values as text and closes the report', () => {
   assert.equal(dom.window.document.querySelector('.gsbd-report'), null);
 });
 
+test('reports Unpaywall successes and lookup details', () => {
+  const dom = new JSDOM('<body></body>');
+  const panel = renderBatchReport(dom.window.document, { results: [{
+    id: 'upw', title: 'OA paper', authors: [], status: 'success', source: 'unpaywall',
+    pdfUrl: 'https://repo.test/paper.pdf', filename: 'paper.pdf', scholarStatus: 'no_pdf',
+    fallbackStatus: 'not_found', unpaywallStatus: 'success', unpaywallDoi: '10.1000/oa',
+    unpaywallHostType: 'repository', unpaywallLicense: 'cc-by', unpaywallRepository: 'Example University',
+  }] });
+  assert.equal(panel.querySelector('.gsbd-report-unpaywall-success').textContent, 'Unpaywall 成功 1');
+  assert.match(panel.textContent, /Unpaywall 结果/);
+  assert.match(panel.textContent, /10\.1000\/oa/);
+  assert.match(panel.textContent, /Example University/);
+});
+
 test('a new result-page batch removes an old report before waiting for the response', async () => {
   const dom = new JSDOM(await fixture('scholar-results.html'), { url: 'https://scholar.google.com/scholar?q=test' });
   let resolveMessage;

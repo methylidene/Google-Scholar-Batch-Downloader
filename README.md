@@ -1,6 +1,6 @@
 # Google Scholar Batch Downloader
 
-一个本地运行的 Chrome Manifest V3 扩展，用于在**当前 Google Scholar 搜索结果页或作者主页**选择论文、批量下载可用的公开 PDF，并在 Scholar 未找到 PDF 或明确下载失败时从 arXiv 查找公开预印本。批次结束后会汇报每篇论文的最终状态，并导出 RIS、BibTeX、JSON 和 CSV。
+一个本地运行的 Chrome Manifest V3 扩展，用于在**当前 Google Scholar 搜索结果页或作者主页**选择论文、批量下载可用的公开 PDF，并在 Scholar 未找到 PDF 或明确下载失败时依次从 arXiv、Unpaywall 查找开放版本。批次结束后会汇报每篇论文的最终状态，并导出 RIS、BibTeX、JSON 和 CSV。
 
 ## 安装
 
@@ -18,7 +18,7 @@
 5. 扩展会等待 Chrome 报告 PDF 实际下载完成或中断，而不是把“已创建下载任务”当作成功。全部论文进入最终状态后，页面会显示汇报面板。
 6. 每次批处理默认都会生成 `.ris`、`.bib`、`.json` 和 `.csv` 四个文件。PDF 文件名格式为 `第一作者 - 年份 - 标题.pdf`；Windows 不允许的字符会被清理，重名由 Chrome 自动编号。
 
-下载间隔可在扩展详情的“扩展程序选项”中设置为 300–5000 毫秒（默认 800）。arXiv 备用源默认开启，也可在选项页关闭。
+下载间隔可在扩展详情的“扩展程序选项”中设置为 300–5000 毫秒（默认 800）。arXiv 与 Unpaywall 备用源默认开启，也可分别关闭。使用 Unpaywall 前必须在选项页填写有效的联系邮箱。
 
 ## 作者主页
 
@@ -39,9 +39,15 @@
 
 匹配成功后，扩展直接下载 Atom 结果中指向 `arxiv.org` 的官方 PDF，并继续监听 Chrome 的实际完成或中断状态。检索失败、没有严格匹配或 arXiv PDF 下载失败都只影响对应论文，不会阻止其余论文和书目导出。
 
+## Unpaywall 备用源
+
+arXiv 阶段结束后，Unpaywall 只处理最终仍为 `no_pdf` 或 `failed` 且带有 DOI 的论文。扩展调用[官方 Unpaywall API v2](https://data.unpaywall.org/products/api)，并按 API 要求附带用户在选项页配置的联系邮箱；邮箱只保存在 Chrome 本机扩展存储中并发送给官方 API。未配置有效邮箱或论文缺少 DOI 时不会发起请求，原因会记录在汇报与 CSV 中。
+
+扩展要求 API 响应 DOI 与目标 DOI 完全一致、`is_oa` 为真，并优先使用 `best_oa_location.url_for_pdf`；若该字段没有安全候选，再检查其他 OA location。只接受 HTTPS PDF URL，不使用标题模糊搜索，也不把 DOI 落地页当作 PDF。匹配的最终来源、许可、版本与仓储机构会随结果导出。官方 API 当前说明的每日请求上限为 100,000 次。
+
 ## 下载汇报与 CSV
 
-批次结束后，Scholar 页面右侧会显示总数、成功下载、arXiv 成功、未找到 PDF、下载失败、下载超时和导出错误数量。展开“逐篇明细”可查看标题、最终状态、最终来源、Scholar 原结果、arXiv 结果、arXiv ID、PDF URL 和失败原因；点击“关闭汇报”可移除面板，开始新批次时旧汇报也会自动移除。
+批次结束后，Scholar 页面右侧会显示总数、成功下载、arXiv 成功、Unpaywall 成功、未找到 PDF、下载失败、下载超时和导出错误数量。展开“逐篇明细”可查看标题、最终状态、最终来源、Scholar 原结果、arXiv 结果、Unpaywall 结果、DOI/OA 来源信息、PDF URL 和失败原因；点击“关闭汇报”可移除面板，开始新批次时旧汇报也会自动移除。
 
 论文最终状态只有四种：
 
@@ -50,9 +56,9 @@
 - `failed`：下载任务启动失败，或 Chrome 报告下载中断。
 - `timeout`：下载启动后四分钟内没有收到完成或中断状态。
 
-自动下载的 CSV 使用 UTF-8 BOM，可在 Windows Excel 中正确显示中文。除原有的论文和最终下载字段外，还包含 `scholarStatus`、`scholarError`、`fallbackStatus`、`fallbackError` 和 `arxivId`，用于追踪两阶段尝试。刷新或关闭 Scholar 页面后不会恢复未完成的页面汇报。
+自动下载的 CSV 使用 UTF-8 BOM，可在 Windows Excel 中正确显示中文。除原有字段外，还包含 Scholar、arXiv 与 Unpaywall 各阶段的状态、错误和 OA 元数据，用于追踪三阶段尝试。刷新或关闭 Scholar 页面后不会恢复未完成的页面汇报。
 
-最终 `source` 为 `scholar` 或 `arxiv`。当前只支持 arXiv；其他备用源和自定义站点尚未实现。
+最终 `source` 为 `scholar`、`arxiv` 或 `unpaywall`。DBLP 与自定义备用站点尚未实现。
 
 ## Zotero
 
@@ -61,18 +67,19 @@
 ## 权限说明
 
 - `downloads`：启动 PDF 和 RIS/BibTeX/JSON/CSV 文件下载，并读取这些下载的完成或中断状态。
-- `storage`：在本机保存下载间隔与 arXiv 备用源开关。
+- `storage`：在本机保存下载间隔、备用源开关与 Unpaywall 联系邮箱。
 - `https://scholar.google.com/*`：解析当前 Scholar 搜索结果页、作者主页及所选论文的详情页。
 - `https://scholar.googleusercontent.com/*`：下载 Scholar 页面提供的公开文件。
 - `https://export.arxiv.org/*`：调用官方 Atom API 检索严格匹配的预印本。
 - `https://arxiv.org/*`：下载匹配结果提供的官方 PDF。
+- `https://api.unpaywall.org/*`：按 DOI 查询官方 Unpaywall API；实际 PDF 下载地址由经过校验的 API 响应提供。
 - `http://127.0.0.1:23119/*`：与本机 Zotero Connector 通信，不访问远程主机。
 
 ## 限制与合规
 
 - 不自动翻页，也不自动点击作者主页的“显示更多”；仅处理用户当前已加载并选择的条目。
 - 不绕过 CAPTCHA、付费墙、订阅或机构认证，不尝试获得页面未公开提供的 PDF。
-- 备用检索仅访问 arXiv 官方 API 和 PDF，不访问其他论文网站，不抓取近似匹配。
+- 备用检索仅使用 arXiv 和 Unpaywall 官方 API；不抓取近似 Unpaywall 匹配，不集成 Sci-Hub 或其他绕过付费访问的网站。
 - 如果入口搜索结果页或作者主页已经显示 CAPTCHA，扩展不会启动批处理，也不会发起下载请求。
 - 如果顺序读取论文详情时才遇到 CAPTCHA 或异常流量，扩展会停止剩余详情查询，但保留此前已找到或条目原有的 PDF 下载，并继续导出全部所选条目的元数据。
 - Google Scholar 的 HTML 结构可能随时改变；批量操作前请检查选择结果，并遵守网站条款及适用法律。

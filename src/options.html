@@ -22,6 +22,11 @@
     <p class="note">允许范围 300–5000，默认 800。适当增大间隔可减少连续请求。</p>
     <label><input id="enable-arxiv" type="checkbox"> Scholar 下载失败后启用 arXiv 备用源</label>
     <p class="note">默认开启。扩展只为未找到 PDF 或明确下载失败的论文串行查询 arXiv；严格匹配 DOI 或标题，API 请求间隔至少 3 秒。</p>
+    <label><input id="enable-unpaywall" type="checkbox"> arXiv 未完成下载后启用 Unpaywall 备用源</label>
+    <label>Unpaywall 联系邮箱
+      <input id="unpaywall-email" type="email" autocomplete="email" placeholder="researcher@example.org">
+    </label>
+    <p class="note">Unpaywall 官方 API 要求提供联系邮箱。扩展只按 DOI 精确查询，只下载 API 返回的 HTTPS 开放获取 PDF。</p>
     <button id="save" type="button">保存</button>
     <p id="status" role="status" aria-live="polite"></p>
   </main>

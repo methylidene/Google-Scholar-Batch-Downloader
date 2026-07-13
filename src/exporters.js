@@ -63,6 +63,14 @@ const CSV_COLUMNS = [
   'fallbackStatus',
   'fallbackError',
   'arxivId',
+  'unpaywallStatus',
+  'unpaywallError',
+  'unpaywallDoi',
+  'unpaywallHostType',
+  'unpaywallLicense',
+  'unpaywallVersion',
+  'unpaywallRepository',
+  'unpaywallOaStatus',
 ];
 
 const escapeCsvCell = value => {

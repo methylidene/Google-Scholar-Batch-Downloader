@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyArxivFallbacks, downloadPapers, makeBatchFiles, normalizeDownloadDelay, runBatch, runWithRetry, sendZotero } from '../src/background.js';
+import { applyArxivFallbacks, applyUnpaywallFallbacks, downloadPapers, makeBatchFiles, normalizeDownloadDelay, runBatch, runWithRetry, sendZotero } from '../src/background.js';
 
 function makeDownloadApi(downloadImpl = async (_options, id) => id) {
   const listeners = new Set();
@@ -211,6 +211,87 @@ test('reports an arXiv download failure without losing the Scholar attempt', asy
   assert.equal(results[0].scholarStatus, 'no_pdf');
   assert.equal(results[0].fallbackStatus, 'failed');
   assert.match(results[0].fallbackError, /arxiv blocked/);
+});
+
+test('retries only unfinished DOI papers through Unpaywall and preserves earlier attempts', async () => {
+  const papers = [
+    { id: 'ok', title: 'Done', authors: [], year: '', doi: '10.1000/done', pdfUrl: '' },
+    { id: 'doi', title: 'OA copy', authors: [], year: '', doi: '10.1000/oa', pdfUrl: '' },
+    { id: 'none', title: 'No DOI', authors: [], year: '', doi: '', pdfUrl: '' },
+  ];
+  const priorResults = [
+    { id: 'ok', title: 'Done', status: 'success', source: 'arxiv', scholarStatus: 'no_pdf', fallbackStatus: 'success' },
+    { id: 'doi', title: 'OA copy', status: 'no_pdf', source: 'scholar', scholarStatus: 'no_pdf', fallbackStatus: 'not_found' },
+    { id: 'none', title: 'No DOI', status: 'failed', source: 'scholar', scholarStatus: 'failed', fallbackStatus: 'not_found' },
+  ];
+  let lookupIds;
+  const { results } = await applyUnpaywallFallbacks(papers, priorResults, 'researcher@example.org', {
+    downloads: makeAutoCompletingDownloads(),
+  }, {
+    findMatches: async eligible => {
+      lookupIds = eligible.map(paper => paper.id);
+      return [
+        { id: 'doi', status: 'matched', match: { doi: '10.1000/oa', pdfUrl: 'https://repo.test/oa.pdf', landingUrl: 'https://repo.test/oa', hostType: 'repository', license: 'cc-by', version: 'acceptedVersion', repositoryInstitution: 'Example University', oaStatus: 'green' } },
+        { id: 'none', status: 'missing_doi' },
+      ];
+    },
+  });
+
+  assert.deepEqual(lookupIds, ['doi', 'none']);
+  assert.deepEqual(results.map(result => result.status), ['success', 'success', 'failed']);
+  assert.equal(results[0].unpaywallStatus, 'not_needed');
+  assert.equal(results[1].source, 'unpaywall');
+  assert.equal(results[1].scholarStatus, 'no_pdf');
+  assert.equal(results[1].fallbackStatus, 'not_found');
+  assert.equal(results[1].unpaywallStatus, 'success');
+  assert.equal(results[1].unpaywallDoi, '10.1000/oa');
+  assert.equal(results[1].unpaywallHostType, 'repository');
+  assert.equal(results[2].unpaywallStatus, 'missing_doi');
+});
+
+test('RUN_BATCH downloads an official Unpaywall PDF after arXiv misses', async () => {
+  const fetched = [];
+  const downloaded = [];
+  const chromeApi = {
+    storage: { local: { get: async defaults => ({ ...defaults, downloadDelayMs: 300, enableArxivFallback: true, enableUnpaywallFallback: true, unpaywallEmail: 'researcher@example.org' }) } },
+    downloads: makeAutoCompletingDownloads(downloaded),
+  };
+  const response = await runBatch([
+    { id: 'p1', title: 'Published Paper', authors: ['Ada'], year: '2024', doi: '10.1000/published', pdfUrl: '' },
+  ], chromeApi, {
+    fetchImpl: async url => {
+      fetched.push(url);
+      if (String(url).startsWith('https://export.arxiv.org/')) return { ok: true, status: 200, text: async () => '<feed></feed>' };
+      return { ok: true, status: 200, json: async () => ({
+        doi: '10.1000/published', is_oa: true, oa_status: 'green',
+        best_oa_location: { url_for_pdf: 'https://repository.test/published.pdf', host_type: 'repository' },
+      }) };
+    },
+    sleep: async () => {},
+  });
+
+  assert.equal(fetched.length, 2);
+  assert.match(fetched[1], /^https:\/\/api\.unpaywall\.org\/v2\//);
+  assert.equal(downloaded[0].url, 'https://repository.test/published.pdf');
+  assert.equal(response.results[0].source, 'unpaywall');
+  assert.equal(response.results[0].unpaywallStatus, 'success');
+  assert.equal(response.unpaywallResults[0].status, 'matched');
+});
+
+test('RUN_BATCH skips Unpaywall API safely when its contact email is missing', async () => {
+  let unpaywallCalls = 0;
+  const response = await runBatch(
+    [{ id: 'p1', title: 'Published Paper', authors: [], doi: '10.1000/published', pdfUrl: '' }],
+    {
+      storage: { local: { get: async defaults => ({ ...defaults, downloadDelayMs: 300, enableArxivFallback: false, enableUnpaywallFallback: true, unpaywallEmail: '' }) } },
+      downloads: { download: async () => 1 },
+    },
+    { fetchImpl: async url => { if (String(url).includes('unpaywall')) unpaywallCalls += 1; throw new Error('unexpected'); } },
+  );
+
+  assert.equal(unpaywallCalls, 0);
+  assert.equal(response.results[0].unpaywallStatus, 'not_configured');
+  assert.match(response.results[0].unpaywallError, /联系邮箱/);
 });
 
 test('RUN_BATCH downloads an exact arXiv fallback when enabled', async () => {
