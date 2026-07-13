@@ -53,3 +53,24 @@ test('normalizes invalid stored delay to the default', () => {
   assert.equal(normalizeDelay(300), 300);
   assert.equal(normalizeDelay(5000), 5000);
 });
+
+test('shows a Chinese error when loading settings fails', async () => {
+  const dom = new JSDOM(markup);
+  const chromeApi = { storage: { local: { get: async () => { throw new Error('storage offline'); } } } };
+
+  await assert.rejects(initializeOptionsPage(dom.window.document, chromeApi), /storage offline/);
+  assert.match(dom.window.document.querySelector('#status').textContent, /读取设置失败/);
+});
+
+test('shows a Chinese error when saving settings fails', async () => {
+  const dom = new JSDOM(markup);
+  const chromeApi = { storage: { local: {
+    get: async () => ({ downloadDelayMs: 800, enableOpenAccessLookup: false }),
+    set: async () => { throw new Error('disk full'); },
+  } } };
+  await initializeOptionsPage(dom.window.document, chromeApi);
+
+  dom.window.document.querySelector('#save').click();
+  await new Promise(resolve => dom.window.setTimeout(resolve, 0));
+  assert.match(dom.window.document.querySelector('#status').textContent, /保存失败.*disk full/);
+});

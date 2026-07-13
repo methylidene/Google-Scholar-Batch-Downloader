@@ -35,3 +35,31 @@ test('does not report a block when result rows exist', () => {
   const dom = new JSDOM(resultsHtml);
   assert.equal(detectScholarBlock(dom.window.document), null);
 });
+
+test('accepts only explicit PDF links or http PDF paths', () => {
+  const dom = new JSDOM(`
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt"><a href="/paper/one">One</a></h3><div class="gs_or_ggsm"><a href="/files/one.pdf?download=1">[HTML]</a></div></div>
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt"><a href="/paper/two">Two</a></h3><a href="https://files.example/two">[PDF]</a></div>
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt"><a href="/paper/three">Three</a></h3><div class="gs_or_ggsm"><a href="https://files.example/three.html">[HTML]</a></div></div>
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt"><a href="/paper/four">Four</a></h3><a href="javascript:alert(1)">[PDF]</a></div>`,
+    { url: 'https://scholar.google.com/scholar?q=test' });
+
+  const papers = parseScholarPage(dom.window.document);
+  assert.equal(papers[0].pdfUrl, 'https://scholar.google.com/files/one.pdf?download=1');
+  assert.equal(papers[1].pdfUrl, 'https://files.example/two');
+  assert.equal(papers[2].pdfUrl, '');
+  assert.equal(papers[3].pdfUrl, '');
+});
+
+test('extracts DOI only from explicit DOI text or doi.org links', () => {
+  const dom = new JSDOM(`
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt">One</h3><div class="gs_rs">DOI: 10.1000/xyz-123.</div></div>
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt">Two</h3><a href="https://doi.org/10.5555/ABC.9">record</a></div>
+    <div class="gs_r gs_or gs_scl"><h3 class="gs_rt">Three</h3><div class="gs_rs">Possible identifier 10.9999/not-explicit</div></div>`,
+    { url: 'https://scholar.google.com/scholar?q=test' });
+
+  const papers = parseScholarPage(dom.window.document);
+  assert.equal(papers[0].doi, '10.1000/xyz-123');
+  assert.equal(papers[1].doi, '10.5555/ABC.9');
+  assert.equal(papers[2].doi, '');
+});

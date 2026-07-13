@@ -10,7 +10,13 @@ export async function initializeOptionsPage(document, chromeApi = chrome) {
   const oaInput = document.querySelector('#enable-oa');
   const saveButton = document.querySelector('#save');
   const status = document.querySelector('#status');
-  const settings = await chromeApi.storage.local.get(DEFAULTS);
+  let settings;
+  try {
+    settings = await chromeApi.storage.local.get(DEFAULTS);
+  } catch (error) {
+    status.textContent = `读取设置失败：${error?.message || String(error)}`;
+    throw error;
+  }
 
   delayInput.value = String(normalizeDelay(settings.downloadDelayMs));
   oaInput.checked = settings.enableOpenAccessLookup === true;

@@ -6,6 +6,37 @@ function resolveUrl(href, document) {
   return href ? new URL(href, document.baseURI).href : '';
 }
 
+function findPdfUrl(row, document) {
+  for (const anchor of row.querySelectorAll('a[href]')) {
+    let url;
+    try {
+      url = new URL(anchor.getAttribute('href'), document.baseURI);
+    } catch {
+      continue;
+    }
+    const isHttp = url.protocol === 'http:' || url.protocol === 'https:';
+    const isExplicitPdf = anchor.textContent.trim().toUpperCase() === '[PDF]';
+    const hasPdfPath = /\.pdf$/i.test(url.pathname);
+    if (isHttp && (isExplicitPdf || hasPdfPath)) return url.href;
+  }
+  return '';
+}
+
+function findDoi(row, document) {
+  for (const anchor of row.querySelectorAll('a[href]')) {
+    try {
+      const url = new URL(anchor.getAttribute('href'), document.baseURI);
+      if ((url.hostname === 'doi.org' || url.hostname === 'www.doi.org') && /^\/10\.\d{4,9}\//i.test(url.pathname)) {
+        return decodeURIComponent(url.pathname.slice(1));
+      }
+    } catch {
+      // Ignore malformed links and continue with explicit text detection.
+    }
+  }
+  const match = row.textContent.match(/doi\s*:\s*(10\.\d{4,9}\/[-._;()/:a-z0-9]+)/i);
+  return match ? match[1].replace(/[.,;:]+$/, '') : '';
+}
+
 export function parseScholarPage(document) {
   return [...document.querySelectorAll(ROW_SELECTOR)].map((row, index) => {
     const id = `gsbd-${index + 1}`;
@@ -19,9 +50,6 @@ export function parseScholarPage(document) {
     const authors = (parts[0] || '').split(',').map(author => author.trim()).filter(Boolean);
     const year = metadata.match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
 
-    const pdfAnchor = row.querySelector('.gs_or_ggsm a')
-      || [...row.querySelectorAll('a')].find(anchor => anchor.textContent.trim().toUpperCase() === '[PDF]');
-
     return normalizePaper({
       id,
       title,
@@ -30,7 +58,8 @@ export function parseScholarPage(document) {
       venue: parts[1] || '',
       snippet: row.querySelector('.gs_rs')?.textContent || '',
       detailUrl: resolveUrl(titleAnchor?.getAttribute('href'), document),
-      pdfUrl: resolveUrl(pdfAnchor?.getAttribute('href'), document),
+      pdfUrl: findPdfUrl(row, document),
+      doi: findDoi(row, document),
     });
   });
 }

@@ -32,7 +32,7 @@ async function download(options, chromeApi = chrome) {
 
 export function normalizeDownloadDelay(value) {
   const delay = Number(value);
-  return Number.isFinite(delay) && delay >= 0 ? delay : 800;
+  return Number.isInteger(delay) && delay >= 300 && delay <= 5000 ? delay : 800;
 }
 
 export async function runBatch(papers, chromeApi = chrome) {

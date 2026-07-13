@@ -39,10 +39,14 @@ test('continues remaining exports and preserves paper results when one export fa
   assert.deepEqual(response.exportErrors.map(item => item.extension), ['bib']);
 });
 
-test('normalizes download delay while preserving zero', () => {
+test('normalizes download delay to the options integer range', () => {
   assert.equal(normalizeDownloadDelay(undefined), 800);
   assert.equal(normalizeDownloadDelay('invalid'), 800);
   assert.equal(normalizeDownloadDelay(-1), 800);
-  assert.equal(normalizeDownloadDelay(0), 0);
-  assert.equal(normalizeDownloadDelay(250.5), 250.5);
+  assert.equal(normalizeDownloadDelay(0), 800);
+  assert.equal(normalizeDownloadDelay(300.5), 800);
+  assert.equal(normalizeDownloadDelay(299), 800);
+  assert.equal(normalizeDownloadDelay(5001), 800);
+  assert.equal(normalizeDownloadDelay(300), 300);
+  assert.equal(normalizeDownloadDelay(5000), 5000);
 });
